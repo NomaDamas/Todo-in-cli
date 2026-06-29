@@ -11,7 +11,9 @@ use chrono::Utc;
 use fs2::FileExt;
 use uuid::Uuid;
 
-use crate::models::{AppState, ChatMessage, Project, RoadmapItem, Todo};
+use crate::models::{
+    AgentAction, AgentActionStatus, AgentTool, AppState, ChatMessage, Project, RoadmapItem, Todo,
+};
 
 pub struct Store {
     path: PathBuf,
@@ -166,6 +168,7 @@ impl Store {
             project_id: project_id.to_string(),
             title,
             completed: false,
+            github_issue: None,
             created_at: Utc::now(),
             completed_at: None,
         };
@@ -201,6 +204,7 @@ impl Store {
             project_id: project_id.to_string(),
             title,
             status: "planned".to_string(),
+            github_issue: None,
             created_at: Utc::now(),
         };
         self.state.roadmap.push(item.clone());
@@ -241,6 +245,179 @@ impl Store {
             .cloned()
             .collect()
     }
+
+    pub fn queue_agent_actions(
+        &mut self,
+        project_id: &str,
+        tools: Vec<AgentTool>,
+    ) -> Result<Vec<AgentAction>> {
+        let created: Vec<AgentAction> = tools
+            .into_iter()
+            .map(|tool| AgentAction {
+                id: short_id(),
+                project_id: project_id.to_string(),
+                tool,
+                status: AgentActionStatus::Pending,
+                result: None,
+                rejection_reason: None,
+                created_at: Utc::now(),
+                decided_at: None,
+            })
+            .collect();
+        self.state.agent_actions.extend(created.clone());
+        Ok(created)
+    }
+
+    pub fn agent_actions_for_project(&self, project_id: &str) -> Vec<AgentAction> {
+        self.state
+            .agent_actions
+            .iter()
+            .filter(|action| action.project_id == project_id)
+            .cloned()
+            .collect()
+    }
+
+    pub fn approve_agent_action(&mut self, project_id: &str, id: &str) -> Result<String> {
+        let index = self
+            .state
+            .agent_actions
+            .iter()
+            .position(|action| action.project_id == project_id && action.id == id)
+            .ok_or_else(|| anyhow!("agent action not found: {id}"))?;
+
+        if !matches!(
+            self.state.agent_actions[index].status,
+            AgentActionStatus::Pending
+        ) {
+            return Err(anyhow!("agent action {id} is not pending"));
+        }
+
+        let tool = self.state.agent_actions[index].tool.clone();
+        let result = match tool {
+            AgentTool::CreateTodo { title } => {
+                let todo = self.add_todo(project_id, title)?;
+                format!("created todo {}", todo.id)
+            }
+            AgentTool::CompleteTodo { id } => {
+                self.complete_todo(project_id, &id)?;
+                format!("completed todo {id}")
+            }
+            AgentTool::CreateRoadmapItem { title } => {
+                let item = self.add_roadmap_item(project_id, title)?;
+                format!("created roadmap item {}", item.id)
+            }
+            AgentTool::SummarizeProject => {
+                let open = self
+                    .todos_for_project(project_id)
+                    .iter()
+                    .filter(|todo| !todo.completed)
+                    .count();
+                let roadmap = self.roadmap_for_project(project_id).len();
+                format!("project has {open} open todos and {roadmap} roadmap items")
+            }
+        };
+
+        let action = &mut self.state.agent_actions[index];
+        action.status = AgentActionStatus::Approved;
+        action.result = Some(result.clone());
+        action.decided_at = Some(Utc::now());
+        Ok(result)
+    }
+
+    pub fn reject_agent_action(
+        &mut self,
+        project_id: &str,
+        id: &str,
+        reason: Option<String>,
+    ) -> Result<()> {
+        let action = self
+            .state
+            .agent_actions
+            .iter_mut()
+            .find(|action| action.project_id == project_id && action.id == id)
+            .ok_or_else(|| anyhow!("agent action not found: {id}"))?;
+
+        if !matches!(action.status, AgentActionStatus::Pending) {
+            return Err(anyhow!("agent action {id} is not pending"));
+        }
+
+        action.status = AgentActionStatus::Rejected;
+        action.rejection_reason = reason;
+        action.decided_at = Some(Utc::now());
+        Ok(())
+    }
+
+    pub fn unsynced_todos(&self, project_id: &str) -> Vec<Todo> {
+        self.state
+            .todos
+            .iter()
+            .filter(|todo| todo.project_id == project_id && todo.github_issue.is_none())
+            .cloned()
+            .collect()
+    }
+
+    pub fn unsynced_roadmap(&self, project_id: &str) -> Vec<RoadmapItem> {
+        self.state
+            .roadmap
+            .iter()
+            .filter(|item| item.project_id == project_id && item.github_issue.is_none())
+            .cloned()
+            .collect()
+    }
+
+    pub fn link_todo_issue(&mut self, project_id: &str, todo_id: &str, issue: u64) -> Result<()> {
+        let todo = self
+            .state
+            .todos
+            .iter_mut()
+            .find(|todo| todo.project_id == project_id && todo.id == todo_id)
+            .ok_or_else(|| anyhow!("todo not found: {todo_id}"))?;
+        todo.github_issue = Some(issue);
+        Ok(())
+    }
+
+    pub fn link_roadmap_issue(
+        &mut self,
+        project_id: &str,
+        item_id: &str,
+        issue: u64,
+    ) -> Result<()> {
+        let item = self
+            .state
+            .roadmap
+            .iter_mut()
+            .find(|item| item.project_id == project_id && item.id == item_id)
+            .ok_or_else(|| anyhow!("roadmap item not found: {item_id}"))?;
+        item.github_issue = Some(issue);
+        Ok(())
+    }
+
+    pub fn project_snapshot(&self, project_id: &str) -> Result<ProjectSnapshot> {
+        let project = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("project not found: {project_id}"))?;
+
+        Ok(ProjectSnapshot {
+            project,
+            todos: self.todos_for_project(project_id),
+            roadmap: self.roadmap_for_project(project_id),
+            chat_messages: self.chat_for_project(project_id),
+            agent_actions: self.agent_actions_for_project(project_id),
+        })
+    }
+}
+
+#[derive(serde::Serialize)]
+pub struct ProjectSnapshot {
+    pub project: Project,
+    pub todos: Vec<Todo>,
+    pub roadmap: Vec<RoadmapItem>,
+    pub chat_messages: Vec<ChatMessage>,
+    pub agent_actions: Vec<AgentAction>,
 }
 
 fn current_project_root() -> Result<PathBuf> {
@@ -304,6 +481,48 @@ mod tests {
         let todos = store.todos_for_project("project");
         assert!(todos[0].completed);
         assert!(todos[0].completed_at.is_some());
+    }
+
+    #[test]
+    fn approves_agent_action_and_applies_mutation() {
+        let mut store = Store {
+            path: PathBuf::from("unused"),
+            state: AppState::default(),
+            _lock: None,
+        };
+
+        let action = store
+            .queue_agent_actions(
+                "project",
+                vec![AgentTool::CreateTodo {
+                    title: "agent todo".to_string(),
+                }],
+            )
+            .unwrap()
+            .remove(0);
+        let result = store.approve_agent_action("project", &action.id).unwrap();
+
+        assert!(result.contains("created todo"));
+        assert_eq!(store.todos_for_project("project")[0].title, "agent todo");
+        assert!(matches!(
+            store.agent_actions_for_project("project")[0].status,
+            AgentActionStatus::Approved
+        ));
+    }
+
+    #[test]
+    fn links_github_issue_to_todo() {
+        let mut store = Store {
+            path: PathBuf::from("unused"),
+            state: AppState::default(),
+            _lock: None,
+        };
+
+        let todo = store.add_todo("project", "sync me".to_string()).unwrap();
+        store.link_todo_issue("project", &todo.id, 9).unwrap();
+
+        assert_eq!(store.todos_for_project("project")[0].github_issue, Some(9));
+        assert!(store.unsynced_todos("project").is_empty());
     }
 
     #[test]

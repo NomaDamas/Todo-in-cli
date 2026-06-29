@@ -16,7 +16,7 @@ use ratatui::{
 };
 
 use crate::{
-    models::{Project, RoadmapItem, Todo},
+    models::{AgentActionStatus, Project, RoadmapItem, Todo},
     storage::Store,
 };
 
@@ -60,9 +60,22 @@ fn run_loop(
         let todos = store.todos_for_project(&project.id);
         let roadmap = store.roadmap_for_project(&project.id);
         let chat = store.chat_for_project(&project.id);
+        let pending_actions = store
+            .agent_actions_for_project(&project.id)
+            .iter()
+            .filter(|action| matches!(action.status, AgentActionStatus::Pending))
+            .count();
 
         terminal.draw(|frame| {
-            layout = draw_dashboard(frame, active, &project, &todos, &roadmap, chat.len());
+            layout = draw_dashboard(
+                frame,
+                active,
+                &project,
+                &todos,
+                &roadmap,
+                chat.len(),
+                pending_actions,
+            );
         })?;
 
         if !event::poll(Duration::from_millis(250))? {
@@ -94,6 +107,7 @@ fn draw_dashboard(
     todos: &[Todo],
     roadmap: &[RoadmapItem],
     chat_count: usize,
+    pending_actions: usize,
 ) -> DashboardLayout {
     let root = frame.area();
     let vertical = Layout::default()
@@ -125,7 +139,10 @@ fn draw_dashboard(
         roadmap_panel(roadmap, active == Pane::Roadmap),
         layout.roadmap,
     );
-    frame.render_widget(chat_panel(chat_count, active == Pane::Chat), layout.chat);
+    frame.render_widget(
+        chat_panel(chat_count, pending_actions, active == Pane::Chat),
+        layout.chat,
+    );
 
     layout
 }
@@ -179,11 +196,12 @@ fn roadmap_panel(roadmap: &[RoadmapItem], active: bool) -> List<'static> {
     List::new(items).block(panel_block("Roadmap", active))
 }
 
-fn chat_panel(chat_count: usize, active: bool) -> Paragraph<'static> {
+fn chat_panel(chat_count: usize, pending_actions: usize, active: bool) -> Paragraph<'static> {
     Paragraph::new(vec![
         Line::from("Agent chat is available from CLI in this MVP:"),
         Line::from("todo-in-cli chat --provider openai \"plan next steps\""),
         Line::from(format!("Persisted project chat messages: {chat_count}")),
+        Line::from(format!("Pending approval actions: {pending_actions}")),
     ])
     .block(panel_block("Agent Chat", active))
     .wrap(Wrap { trim: true })
