@@ -1,11 +1,14 @@
 use std::{
     env, fs,
+    fs::{File, OpenOptions},
+    io::Write,
     path::{Path, PathBuf},
     process::Command,
 };
 
 use anyhow::{Context, Result, anyhow};
 use chrono::Utc;
+use fs2::FileExt;
 use uuid::Uuid;
 
 use crate::models::{AppState, ChatMessage, Project, RoadmapItem, Todo};
@@ -13,38 +16,121 @@ use crate::models::{AppState, ChatMessage, Project, RoadmapItem, Todo};
 pub struct Store {
     path: PathBuf,
     state: AppState,
+    _lock: Option<File>,
 }
 
 impl Store {
     pub fn open_default() -> Result<Self> {
-        let home = env::var_os("TODO_IN_CLI_HOME")
-            .map(PathBuf::from)
-            .or_else(|| dirs::home_dir().map(|path| path.join(".todo-in-cli")))
-            .context("could not determine home directory")?;
-        fs::create_dir_all(&home)
-            .with_context(|| format!("failed to create state directory {}", home.display()))?;
-        Self::open(home.join("state.json"))
+        Self::open(default_state_path()?)
+    }
+
+    pub fn open_default_locked() -> Result<Self> {
+        let path = default_state_path()?;
+        let lock_path = path.with_extension("lock");
+        let lock = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+            .with_context(|| format!("failed to open lock file {}", lock_path.display()))?;
+        lock.lock_exclusive()
+            .with_context(|| format!("failed to lock {}", lock_path.display()))?;
+        let mut store = Self::open(path)?;
+        store._lock = Some(lock);
+        Ok(store)
     }
 
     pub fn open(path: PathBuf) -> Result<Self> {
-        let state = if path.exists() {
-            let raw = fs::read_to_string(&path)
-                .with_context(|| format!("failed to read {}", path.display()))?;
-            serde_json::from_str(&raw)
-                .with_context(|| format!("failed to parse {}", path.display()))?
-        } else {
-            AppState::default()
-        };
-
-        Ok(Self { path, state })
+        let state = read_state(&path)?;
+        Ok(Self {
+            path,
+            state,
+            _lock: None,
+        })
     }
 
     pub fn save(&self) -> Result<()> {
+        let parent = self
+            .path
+            .parent()
+            .with_context(|| format!("state path has no parent: {}", self.path.display()))?;
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create state directory {}", parent.display()))?;
+
+        if self.path.exists() {
+            let backup = self.path.with_extension("json.bak");
+            fs::copy(&self.path, &backup)
+                .with_context(|| format!("failed to create backup {}", backup.display()))?;
+        }
+
+        let temp = self.path.with_extension("json.tmp");
         let raw = serde_json::to_string_pretty(&self.state)?;
-        fs::write(&self.path, raw)
-            .with_context(|| format!("failed to write {}", self.path.display()))
+        {
+            let mut file = OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&temp)
+                .with_context(|| format!("failed to open temp state {}", temp.display()))?;
+            file.write_all(raw.as_bytes())
+                .with_context(|| format!("failed to write temp state {}", temp.display()))?;
+            file.sync_all()
+                .with_context(|| format!("failed to sync temp state {}", temp.display()))?;
+        }
+        fs::rename(&temp, &self.path).with_context(|| {
+            format!(
+                "failed to atomically replace {} with {}",
+                self.path.display(),
+                temp.display()
+            )
+        })?;
+
+        if let Ok(dir) = File::open(parent) {
+            let _ = dir.sync_all();
+        }
+
+        Ok(())
+    }
+}
+
+fn default_state_path() -> Result<PathBuf> {
+    let home = env::var_os("TODO_IN_CLI_HOME")
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|path| path.join(".todo-in-cli")))
+        .context("could not determine home directory")?;
+    fs::create_dir_all(&home)
+        .with_context(|| format!("failed to create state directory {}", home.display()))?;
+    Ok(home.join("state.json"))
+}
+
+fn read_state(path: &Path) -> Result<AppState> {
+    if !path.exists() {
+        return Ok(AppState::default());
     }
 
+    let raw =
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
+    match serde_json::from_str(&raw) {
+        Ok(state) => Ok(state),
+        Err(error) => {
+            let backup = path.with_extension("json.bak");
+            if backup.exists() {
+                let raw = fs::read_to_string(&backup)
+                    .with_context(|| format!("failed to read backup {}", backup.display()))?;
+                return serde_json::from_str(&raw).with_context(|| {
+                    format!(
+                        "failed to parse {} and backup {}",
+                        path.display(),
+                        backup.display()
+                    )
+                });
+            }
+            Err(error).with_context(|| format!("failed to parse {}", path.display()))
+        }
+    }
+}
+
+impl Store {
     pub fn ensure_current_project(&mut self) -> Result<Project> {
         let root = current_project_root()?;
         let root_string = root.to_string_lossy().to_string();
@@ -197,6 +283,7 @@ mod tests {
         let mut store = Store {
             path: PathBuf::from("unused"),
             state: AppState::default(),
+            _lock: None,
         };
 
         let error = store.add_todo("project", "   ".to_string()).unwrap_err();
@@ -208,6 +295,7 @@ mod tests {
         let mut store = Store {
             path: PathBuf::from("unused"),
             state: AppState::default(),
+            _lock: None,
         };
 
         let todo = store.add_todo("project", "ship".to_string()).unwrap();
@@ -216,5 +304,23 @@ mod tests {
         let todos = store.todos_for_project("project");
         assert!(todos[0].completed);
         assert!(todos[0].completed_at.is_some());
+    }
+
+    #[test]
+    fn recovers_from_backup_when_state_is_corrupt() {
+        let dir = env::temp_dir().join(format!("todo-in-cli-test-{}", short_id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("state.json");
+        let backup = dir.join("state.json.bak");
+        fs::write(&path, "{").unwrap();
+        fs::write(
+            &backup,
+            r#"{"projects":[],"todos":[],"roadmap":[],"chat_messages":[]}"#,
+        )
+        .unwrap();
+
+        let store = Store::open(path).unwrap();
+
+        assert!(store.state.projects.is_empty());
     }
 }

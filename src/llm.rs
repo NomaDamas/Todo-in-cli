@@ -1,8 +1,9 @@
 use std::env;
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
-use reqwest::Client;
+use reqwest::{Client, ClientBuilder};
 use serde_json::{Value, json};
 
 use crate::cli::ProviderKind;
@@ -57,7 +58,7 @@ struct GrokProvider {
 impl OpenAiProvider {
     fn from_env() -> Result<Self> {
         Ok(Self {
-            client: Client::new(),
+            client: http_client()?,
             api_key: required_env("OPENAI_API_KEY")?,
             model: env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-4.1".to_string()),
         })
@@ -67,7 +68,7 @@ impl OpenAiProvider {
 impl ClaudeProvider {
     fn from_env() -> Result<Self> {
         Ok(Self {
-            client: Client::new(),
+            client: http_client()?,
             api_key: required_env("ANTHROPIC_API_KEY")?,
             model: env::var("ANTHROPIC_MODEL").unwrap_or_else(|_| "claude-sonnet-4-5".to_string()),
         })
@@ -77,7 +78,7 @@ impl ClaudeProvider {
 impl GeminiProvider {
     fn from_env() -> Result<Self> {
         Ok(Self {
-            client: Client::new(),
+            client: http_client()?,
             api_key: required_env("GEMINI_API_KEY")?,
             model: env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-2.5-pro".to_string()),
         })
@@ -87,7 +88,7 @@ impl GeminiProvider {
 impl GrokProvider {
     fn from_env() -> Result<Self> {
         Ok(Self {
-            client: Client::new(),
+            client: http_client()?,
             api_key: required_env("XAI_API_KEY")?,
             model: env::var("XAI_MODEL").unwrap_or_else(|_| "grok-4".to_string()),
         })
@@ -149,8 +150,8 @@ impl LlmProvider for ClaudeProvider {
 impl LlmProvider for GeminiProvider {
     async fn chat(&self, request: ChatRequest) -> Result<ChatResponse> {
         let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-            self.model, self.api_key
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
+            self.model
         );
         let body = json!({
             "systemInstruction": {
@@ -164,6 +165,7 @@ impl LlmProvider for GeminiProvider {
         let value = self
             .client
             .post(url)
+            .header("x-goog-api-key", &self.api_key)
             .json(&body)
             .send()
             .await?
@@ -224,7 +226,20 @@ fn extract_openai_message(value: Value) -> Result<ChatResponse> {
 }
 
 fn required_env(name: &str) -> Result<String> {
-    env::var(name).map_err(|_| anyhow!("{name} is required for this provider"))
+    let value = env::var(name).map_err(|_| anyhow!("{name} is required for this provider"))?;
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(anyhow!("{name} is required for this provider"));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn http_client() -> Result<Client> {
+    ClientBuilder::new()
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(60))
+        .build()
+        .context("failed to build HTTP client")
 }
 
 #[cfg(test)]
@@ -239,5 +254,15 @@ mod tests {
 
         let response = extract_openai_message(value).unwrap();
         assert_eq!(response.message, "hello");
+    }
+
+    #[test]
+    fn rejects_empty_api_key_values() {
+        unsafe {
+            env::set_var("TODO_IN_CLI_EMPTY_KEY_TEST", "   ");
+        }
+
+        let error = required_env("TODO_IN_CLI_EMPTY_KEY_TEST").unwrap_err();
+        assert!(error.to_string().contains("TODO_IN_CLI_EMPTY_KEY_TEST"));
     }
 }
