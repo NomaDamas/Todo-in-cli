@@ -34,7 +34,7 @@ todo-in-cli roadmap list
 todo-in-cli chat --provider openai "Draft the next milestone"
 todo-in-cli agent propose '{"tool":"create_todo","title":"Review approval flow"}'
 todo-in-cli agent list
-todo-in-cli agent approve <action-id> --user-confirmed
+todo-in-cli agent approve <action-id>
 todo-in-cli api manifest
 todo-in-cli api snapshot
 todo-in-cli github sync --dry-run
@@ -67,7 +67,7 @@ Agentic mutations are approval-gated. Assistants and plugins can queue structure
 ```sh
 todo-in-cli agent propose '[{"tool":"create_todo","title":"Add release checklist"},{"tool":"create_roadmap_item","title":"v0.2 agent tools"}]'
 todo-in-cli agent list
-todo-in-cli agent approve <action-id> --user-confirmed
+todo-in-cli agent approve <action-id>
 todo-in-cli agent reject <action-id> --reason "not needed"
 ```
 
@@ -80,7 +80,7 @@ Supported tools:
 
 ## Plugin And Agent Host Integration
 
-The crate exposes reusable modules through `src/lib.rs`, and the CLI exposes stable JSON surfaces. Plugin hosts should propose actions, but they should not call approval commands; approvals are reserved for human-facing terminal or TUI surfaces.
+The crate exposes reusable modules through `src/lib.rs`, and the CLI exposes stable JSON surfaces. Plugin hosts should propose actions, but they cannot approve actions non-interactively; approvals require a human-facing terminal confirmation prompt.
 
 ```sh
 todo-in-cli api manifest

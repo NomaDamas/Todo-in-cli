@@ -40,7 +40,7 @@ todo-in-cli agent propose '<json-action-or-array>'
 - Hosts can propose actions through `agent propose`.
 - Hosts must not expect proposed actions to mutate state.
 - Users approve or reject actions explicitly through human-facing CLI/TUI flows.
-- Hosts must not call `agent approve`; the CLI requires `--user-confirmed` as an explicit guardrail.
+- Hosts must not call `agent approve`; the CLI rejects non-interactive approval unless an operator explicitly sets `TODO_IN_CLI_ALLOW_NONINTERACTIVE_APPROVAL=1`.
 - Approved and rejected actions remain in local audit state.
 - Secrets stay in environment variables and are never stored in plugin metadata.
 

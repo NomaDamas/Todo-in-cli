@@ -64,12 +64,7 @@ pub enum AgentCommand {
     /// List proposed and audited agent actions.
     List,
     /// Approve a pending action and apply its mutation.
-    Approve {
-        id: String,
-        /// Required guardrail: only a human-facing UI or terminal user should pass this flag.
-        #[arg(long)]
-        user_confirmed: bool,
-    },
+    Approve { id: String },
     /// Reject a pending action without mutating project state.
     Reject {
         id: String,

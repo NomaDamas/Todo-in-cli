@@ -1,5 +1,8 @@
-use anyhow::Result;
+use std::io::Write;
+
+use anyhow::{Context, Result};
 use clap::Parser;
+use crossterm::tty::IsTty;
 use todo_in_cli::{
     agent,
     cli::{
@@ -101,12 +104,8 @@ async fn main() -> Result<()> {
                     );
                 }
             }
-            AgentCommand::Approve { id, user_confirmed } => {
-                if !user_confirmed {
-                    anyhow::bail!(
-                        "approval requires --user-confirmed; plugins should propose actions and wait for a human-facing approval surface"
-                    );
-                }
+            AgentCommand::Approve { id } => {
+                require_human_approval(&id)?;
                 let mut store = Store::open_default_locked()?;
                 let project = store.ensure_current_project()?;
                 let outcome = store.approve_agent_action(&project.id, &id)?;
@@ -144,6 +143,34 @@ async fn main() -> Result<()> {
                 }
             }
         },
+    }
+
+    Ok(())
+}
+
+fn require_human_approval(id: &str) -> Result<()> {
+    if std::env::var("TODO_IN_CLI_ALLOW_NONINTERACTIVE_APPROVAL").as_deref() == Ok("1") {
+        return Ok(());
+    }
+
+    if !std::io::stdin().is_tty() || !std::io::stderr().is_tty() {
+        anyhow::bail!(
+            "agent approval requires an interactive terminal; plugins may propose actions but cannot approve them"
+        );
+    }
+
+    eprint!("Approve agent action {id}? Type 'approve' to continue: ");
+    std::io::stderr()
+        .flush()
+        .context("failed to flush prompt")?;
+
+    let mut input = String::new();
+    std::io::stdin()
+        .read_line(&mut input)
+        .context("failed to read approval confirmation")?;
+
+    if input.trim() != "approve" {
+        anyhow::bail!("approval cancelled");
     }
 
     Ok(())
