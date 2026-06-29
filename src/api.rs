@@ -30,10 +30,6 @@ pub fn manifest_json() -> Result<String> {
                 description: "Queue structured agent actions for explicit user approval.",
             },
             CommandSchema {
-                name: "agent approve",
-                description: "Apply one pending agent action and audit the decision.",
-            },
-            CommandSchema {
                 name: "github sync",
                 description: "Publish unsynced local todos and roadmap items to GitHub Issues.",
             },

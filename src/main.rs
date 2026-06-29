@@ -101,7 +101,12 @@ async fn main() -> Result<()> {
                     );
                 }
             }
-            AgentCommand::Approve { id } => {
+            AgentCommand::Approve { id, user_confirmed } => {
+                if !user_confirmed {
+                    anyhow::bail!(
+                        "approval requires --user-confirmed; plugins should propose actions and wait for a human-facing approval surface"
+                    );
+                }
                 let mut store = Store::open_default_locked()?;
                 let project = store.ensure_current_project()?;
                 let outcome = store.approve_agent_action(&project.id, &id)?;
@@ -128,15 +133,12 @@ async fn main() -> Result<()> {
         },
         Command::Github { command } => match command {
             GithubCommand::Sync { kind, dry_run } => {
-                let mut store = Store::open_default_locked()?;
-                let project = store.ensure_current_project()?;
                 let kind = match kind {
                     SyncKind::Todos => github::SyncKind::Todos,
                     SyncKind::Roadmap => github::SyncKind::Roadmap,
                     SyncKind::All => github::SyncKind::All,
                 };
-                let report = github::sync_issues(&mut store, &project.id, kind, dry_run)?;
-                store.save()?;
+                let report = github::sync_issues(kind, dry_run)?;
                 for line in report.lines {
                     println!("{line}");
                 }

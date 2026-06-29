@@ -15,16 +15,17 @@ pub struct SyncReport {
     pub lines: Vec<String>,
 }
 
-pub fn sync_issues(
-    store: &mut Store,
-    project_id: &str,
-    kind: SyncKind,
-    dry_run: bool,
-) -> Result<SyncReport> {
+pub fn sync_issues(kind: SyncKind, dry_run: bool) -> Result<SyncReport> {
     let mut lines = Vec::new();
+    let mut store = if dry_run {
+        Store::open_default()?
+    } else {
+        Store::open_default_locked()?
+    };
+    let project = store.ensure_current_project()?;
 
     if matches!(kind, SyncKind::All | SyncKind::Todos) {
-        for todo in store.unsynced_todos(project_id) {
+        for todo in store.unsynced_todos(&project.id) {
             let title = format!("[todo] {}", todo.title);
             let body = format!(
                 "Created from todo-in-cli.\n\nLocal todo id: `{}`\nStatus: `{}`",
@@ -35,14 +36,15 @@ pub fn sync_issues(
                 lines.push(format!("dry-run todo {} -> {title}", todo.id));
             } else {
                 let issue = create_issue(&title, &body)?;
-                store.link_todo_issue(project_id, &todo.id, issue)?;
+                store.link_todo_issue(&project.id, &todo.id, issue)?;
+                store.save()?;
                 lines.push(format!("synced todo {} -> issue #{issue}", todo.id));
             }
         }
     }
 
     if matches!(kind, SyncKind::All | SyncKind::Roadmap) {
-        for item in store.unsynced_roadmap(project_id) {
+        for item in store.unsynced_roadmap(&project.id) {
             let title = format!("[roadmap] {}", item.title);
             let body = format!(
                 "Created from todo-in-cli.\n\nLocal roadmap id: `{}`\nStatus: `{}`",
@@ -52,7 +54,8 @@ pub fn sync_issues(
                 lines.push(format!("dry-run roadmap {} -> {title}", item.id));
             } else {
                 let issue = create_issue(&title, &body)?;
-                store.link_roadmap_issue(project_id, &item.id, issue)?;
+                store.link_roadmap_issue(&project.id, &item.id, issue)?;
+                store.save()?;
                 lines.push(format!("synced roadmap {} -> issue #{issue}", item.id));
             }
         }

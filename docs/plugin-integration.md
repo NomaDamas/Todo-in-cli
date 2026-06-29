@@ -10,8 +10,6 @@ Use these commands from Codex CLI, Claude Code, MCP servers, or similar hosts:
 todo-in-cli api manifest
 todo-in-cli api snapshot
 todo-in-cli agent propose '<json-action-or-array>'
-todo-in-cli agent approve <action-id>
-todo-in-cli agent reject <action-id> --reason '<reason>'
 ```
 
 ## Action Schema
@@ -41,7 +39,8 @@ todo-in-cli agent reject <action-id> --reason '<reason>'
 - Hosts can read state through `api snapshot`.
 - Hosts can propose actions through `agent propose`.
 - Hosts must not expect proposed actions to mutate state.
-- Users approve or reject actions explicitly.
+- Users approve or reject actions explicitly through human-facing CLI/TUI flows.
+- Hosts must not call `agent approve`; the CLI requires `--user-confirmed` as an explicit guardrail.
 - Approved and rejected actions remain in local audit state.
 - Secrets stay in environment variables and are never stored in plugin metadata.
 
