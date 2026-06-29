@@ -10,7 +10,9 @@ This repository is starting with an MVP implementation:
 - tmux-friendly `ratatui` dashboard.
 - CLI commands for local workflows.
 - Provider abstraction for GPT, Claude, Gemini, and Grok chat.
-- Future-work tracks for Codex/Claude plugin integration and GitHub Issue sync.
+- Agent approval flow for safe assistant-proposed mutations.
+- Codex/Claude-style plugin integration surfaces.
+- GitHub Issue sync through the authenticated `gh` CLI.
 
 ## Quick Start
 
@@ -30,6 +32,13 @@ todo-in-cli todo done <todo-id>
 todo-in-cli roadmap add "Provider abstraction"
 todo-in-cli roadmap list
 todo-in-cli chat --provider openai "Draft the next milestone"
+todo-in-cli agent propose '{"tool":"create_todo","title":"Review approval flow"}'
+todo-in-cli agent list
+todo-in-cli agent approve <action-id>
+todo-in-cli api manifest
+todo-in-cli api snapshot
+todo-in-cli github sync --dry-run
+todo-in-cli github sync --kind todos
 ```
 
 ## LLM Provider Environment Variables
@@ -50,3 +59,44 @@ Local state is stored under:
 ```
 
 Set `TODO_IN_CLI_HOME` to override the storage directory.
+
+## Agent Approval Flow
+
+Agentic mutations are approval-gated. Assistants and plugins can queue structured actions, but state changes only happen after explicit user approval.
+
+```sh
+todo-in-cli agent propose '[{"tool":"create_todo","title":"Add release checklist"},{"tool":"create_roadmap_item","title":"v0.2 agent tools"}]'
+todo-in-cli agent list
+todo-in-cli agent approve <action-id>
+todo-in-cli agent reject <action-id> --reason "not needed"
+```
+
+Supported tools:
+
+- `create_todo`
+- `complete_todo`
+- `create_roadmap_item`
+- `summarize_project`
+
+## Plugin And Agent Host Integration
+
+The crate exposes reusable modules through `src/lib.rs`, and the CLI exposes stable JSON surfaces:
+
+```sh
+todo-in-cli api manifest
+todo-in-cli api snapshot
+```
+
+Codex CLI, Claude Code, or MCP-style plugin hosts should call these commands instead of scraping terminal UI output. See [docs/plugin-integration.md](docs/plugin-integration.md).
+
+## GitHub Issue Sync
+
+GitHub sync uses the authenticated `gh` CLI in the current git repository:
+
+```sh
+gh auth login
+todo-in-cli github sync --dry-run
+todo-in-cli github sync --kind all
+```
+
+Synced local items store their GitHub issue number to prevent duplicate publishes. See [docs/github-sync.md](docs/github-sync.md).

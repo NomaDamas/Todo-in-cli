@@ -27,6 +27,21 @@ pub enum Command {
         provider: ProviderKind,
         message: String,
     },
+    /// Queue, inspect, approve, and reject assistant-proposed actions.
+    Agent {
+        #[command(subcommand)]
+        command: AgentCommand,
+    },
+    /// Machine-readable API for future Codex/Claude-style plugins.
+    Api {
+        #[command(subcommand)]
+        command: ApiCommand,
+    },
+    /// Sync local planning items to GitHub Issues through gh.
+    Github {
+        #[command(subcommand)]
+        command: GithubCommand,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -40,6 +55,48 @@ pub enum TodoCommand {
 pub enum RoadmapCommand {
     Add { title: String },
     List,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AgentCommand {
+    /// Queue one or more proposed actions from JSON.
+    Propose { json: String },
+    /// List proposed and audited agent actions.
+    List,
+    /// Approve a pending action and apply its mutation.
+    Approve { id: String },
+    /// Reject a pending action without mutating project state.
+    Reject {
+        id: String,
+        #[arg(long)]
+        reason: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ApiCommand {
+    /// Print project state as stable JSON.
+    Snapshot,
+    /// Print plugin/API command manifest as stable JSON.
+    Manifest,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum GithubCommand {
+    /// Publish unsynced local todos and roadmap items to GitHub Issues.
+    Sync {
+        #[arg(long, value_enum, default_value_t = SyncKind::All)]
+        kind: SyncKind,
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum SyncKind {
+    All,
+    Todos,
+    Roadmap,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
