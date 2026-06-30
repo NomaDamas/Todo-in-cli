@@ -325,7 +325,7 @@ impl DashboardLayout {
             return None;
         }
 
-        let content_top = self.project.y.saturating_add(2);
+        let content_top = self.project.y.saturating_add(1);
         if row < content_top {
             return None;
         }
