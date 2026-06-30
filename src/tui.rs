@@ -174,10 +174,7 @@ struct DashboardView<'a> {
 }
 
 fn project_panel(projects: &[Project], selected: &Project, active: bool) -> List<'static> {
-    let mut items = vec![ListItem::new(Line::from(vec![Span::styled(
-        "Click project to switch",
-        Style::default().fg(Color::Cyan),
-    )]))];
+    let mut items = Vec::new();
 
     if projects.is_empty() {
         items.push(ListItem::new("No projects yet."));
@@ -206,7 +203,7 @@ fn project_panel(projects: &[Project], selected: &Project, active: bool) -> List
         ListItem::new("Tab: next pane, q: quit"),
     ]);
 
-    List::new(items).block(panel_block("Project", active))
+    List::new(items).block(panel_block("Projects - click to switch", active))
 }
 
 fn truncate_project_label(marker: &str, name: &str) -> String {
@@ -333,8 +330,7 @@ impl DashboardLayout {
             return None;
         }
 
-        let row_offset = usize::from(row.saturating_sub(content_top));
-        row_offset.checked_sub(1)
+        Some(usize::from(row.saturating_sub(content_top)))
     }
 }
 
