@@ -106,9 +106,10 @@ fn run_loop(
 
         match event::read()? {
             Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
-                KeyCode::Char('q') | KeyCode::Esc => break,
+                KeyCode::Char('q') if active != Pane::Chat => break,
+                KeyCode::Esc => break,
                 KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => break,
-                KeyCode::Char('x') => codex_enabled = !codex_enabled,
+                KeyCode::Char('x') if active != Pane::Chat => codex_enabled = !codex_enabled,
                 KeyCode::Enter if active == Pane::Chat && !chat_input.trim().is_empty() => {
                     status = "sending chat message...".to_string();
                     terminal.draw(|frame| {

@@ -17,6 +17,16 @@ pub struct SyncReport {
 }
 
 pub fn sync_issues(kind: SyncKind, dry_run: bool, pull: bool) -> Result<SyncReport> {
+    let mut lines = push_issues(kind, dry_run)?.lines;
+
+    if pull {
+        lines.extend(pull_issues(dry_run)?.lines);
+    }
+
+    Ok(SyncReport { lines })
+}
+
+fn push_issues(kind: SyncKind, dry_run: bool) -> Result<SyncReport> {
     let mut lines = Vec::new();
     let mut store = if dry_run {
         Store::open_default()?
@@ -66,10 +76,6 @@ pub fn sync_issues(kind: SyncKind, dry_run: bool, pull: bool) -> Result<SyncRepo
         lines.push("nothing to sync".to_string());
     }
 
-    if pull {
-        lines.extend(pull_issues(dry_run)?.lines);
-    }
-
     Ok(SyncReport { lines })
 }
 
@@ -98,6 +104,14 @@ pub fn pull_issues(dry_run: bool) -> Result<SyncReport> {
                 } else if store.set_todo_completed_by_issue(&project.id, issue.number, closed)? {
                     lines.push(format!("updated todo from issue #{}", issue.number));
                     store.save()?;
+                } else if store.link_matching_todo_from_github(
+                    &project.id,
+                    &title,
+                    issue.number,
+                    closed,
+                )? {
+                    lines.push(format!("linked todo to issue #{}", issue.number));
+                    store.save()?;
                 } else {
                     let todo =
                         store.add_todo_from_github(&project.id, title, issue.number, closed)?;
@@ -117,6 +131,14 @@ pub fn pull_issues(dry_run: bool) -> Result<SyncReport> {
                     ));
                 } else if store.set_roadmap_status_by_issue(&project.id, issue.number, status)? {
                     lines.push(format!("updated roadmap from issue #{}", issue.number));
+                    store.save()?;
+                } else if store.link_matching_roadmap_from_github(
+                    &project.id,
+                    &title,
+                    issue.number,
+                    closed,
+                )? {
+                    lines.push(format!("linked roadmap to issue #{}", issue.number));
                     store.save()?;
                 } else {
                     let item =

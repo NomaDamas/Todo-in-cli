@@ -22,8 +22,9 @@ async fn main() -> Result<()> {
         provider: todo_in_cli::cli::ProviderKind::Openai,
     }) {
         Command::Tui { provider } => {
-            let mut store = Store::open_default()?;
+            let mut store = Store::open_default_locked()?;
             let project = store.ensure_current_project()?;
+            store.save()?;
             tui::run(project, provider)?;
         }
         Command::Todo { command } => match command {

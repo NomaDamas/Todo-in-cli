@@ -20,6 +20,7 @@ pub fn chat(project: &Project, message: &str) -> Result<String> {
     let command = env::var("TODO_IN_CLI_CODEX_COMMAND").unwrap_or_else(|_| "codex".to_string());
     let output = Command::new(&command)
         .args(["exec", "--skip-git-repo-check", &prompt])
+        .current_dir(&project.root)
         .output()
         .with_context(|| format!("failed to execute {command}"))?;
 
