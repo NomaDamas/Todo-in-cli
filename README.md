@@ -29,6 +29,7 @@ cargo run -- tui
 
 ```sh
 todo-in-cli tui
+todo-in-cli tui --provider claude
 todo-in-cli todo add "Write acceptance tests"
 todo-in-cli todo list
 todo-in-cli todo done <todo-id>
@@ -42,6 +43,8 @@ todo-in-cli api manifest
 todo-in-cli api snapshot
 todo-in-cli github sync --dry-run
 todo-in-cli github sync --kind todos
+todo-in-cli github sync --pull
+todo-in-cli github pull --dry-run
 ```
 
 ## TUI Controls
@@ -52,14 +55,26 @@ Mouse click      Focus a pane
 Project click    Switch the active project in the Project pane
 x                Toggle Codex mode indicator
 q / Esc / Ctrl-C Exit
+Chat pane        Type directly, Enter sends to the selected provider
 ```
 
 The TUI renders a terminal-safe Markdown subset:
 
 - headings: `#`, `##`, `###`
 - bullets: `- item`
+- numbered lists: `1. item`
+- blockquotes: `> quote`
 - bold: `**text**`
 - inline code: `` `command` ``
+- links: `[label](url)`
+- strikethrough: `~~text~~`
+
+When Codex mode is enabled with `x`, chat messages create a Codex handoff by default. To execute a local Codex CLI command from the TUI, explicitly set:
+
+```sh
+TODO_IN_CLI_CODEX_EXEC=1
+TODO_IN_CLI_CODEX_COMMAND=codex
+```
 
 ## LLM Provider Environment Variables
 
@@ -117,6 +132,8 @@ GitHub sync uses the authenticated `gh` CLI in the current git repository:
 gh auth login
 todo-in-cli github sync --dry-run
 todo-in-cli github sync --kind all
+todo-in-cli github sync --pull
+todo-in-cli github pull
 ```
 
 Synced local items store their GitHub issue number to prevent duplicate publishes. See [docs/github-sync.md](docs/github-sync.md).

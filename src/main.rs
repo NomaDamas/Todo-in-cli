@@ -18,11 +18,13 @@ use todo_in_cli::{
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    match cli.command.unwrap_or(Command::Tui) {
-        Command::Tui => {
+    match cli.command.unwrap_or(Command::Tui {
+        provider: todo_in_cli::cli::ProviderKind::Openai,
+    }) {
+        Command::Tui { provider } => {
             let mut store = Store::open_default()?;
             let project = store.ensure_current_project()?;
-            tui::run(&store, project)?;
+            tui::run(project, provider)?;
         }
         Command::Todo { command } => match command {
             TodoCommand::Add { title } => {
@@ -131,13 +133,23 @@ async fn main() -> Result<()> {
             }
         },
         Command::Github { command } => match command {
-            GithubCommand::Sync { kind, dry_run } => {
+            GithubCommand::Sync {
+                kind,
+                dry_run,
+                pull,
+            } => {
                 let kind = match kind {
                     SyncKind::Todos => github::SyncKind::Todos,
                     SyncKind::Roadmap => github::SyncKind::Roadmap,
                     SyncKind::All => github::SyncKind::All,
                 };
-                let report = github::sync_issues(kind, dry_run)?;
+                let report = github::sync_issues(kind, dry_run, pull)?;
+                for line in report.lines {
+                    println!("{line}");
+                }
+            }
+            GithubCommand::Pull { dry_run } => {
+                let report = github::pull_issues(dry_run)?;
                 for line in report.lines {
                     println!("{line}");
                 }
