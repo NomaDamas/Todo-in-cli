@@ -18,10 +18,9 @@ pub fn render_lines(input: &str) -> Vec<Line<'static>> {
                 return styled_line(text, Color::Yellow, Modifier::BOLD);
             }
             if let Some(text) = trimmed.strip_prefix("- ") {
-                return Line::from(vec![
-                    Span::styled("• ", Style::default().fg(Color::Yellow)),
-                    inline_spans(text),
-                ]);
+                let mut spans = vec![Span::styled("• ", Style::default().fg(Color::Yellow))];
+                spans.extend(inline_segments(text));
+                return Line::from(spans);
             }
             Line::from(inline_segments(trimmed))
         })
@@ -43,10 +42,6 @@ fn styled_line(text: &str, color: Color, modifier: Modifier) -> Line<'static> {
         text.to_string(),
         Style::default().fg(color).add_modifier(modifier),
     ))
-}
-
-fn inline_spans(input: &str) -> Span<'static> {
-    Span::from(input.to_string())
 }
 
 fn inline_segments(input: &str) -> Vec<Span<'static>> {
@@ -109,5 +104,6 @@ mod tests {
     fn renders_heading_and_body() {
         let lines = render_lines("# Title\n- **todo** `cmd`");
         assert_eq!(lines.len(), 2);
+        assert!(lines[1].spans.len() > 2);
     }
 }

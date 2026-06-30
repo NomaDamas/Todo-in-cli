@@ -173,16 +173,14 @@ struct DashboardView<'a> {
     codex_enabled: bool,
 }
 
-fn project_panel(projects: &[Project], selected: &Project, active: bool) -> Paragraph<'static> {
-    let mut lines = vec![Line::from(vec![Span::styled(
-        "Projects",
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD),
-    )])];
+fn project_panel(projects: &[Project], selected: &Project, active: bool) -> List<'static> {
+    let mut items = vec![ListItem::new(Line::from(vec![Span::styled(
+        "Click project to switch",
+        Style::default().fg(Color::Cyan),
+    )]))];
 
     if projects.is_empty() {
-        lines.push(Line::from("No projects yet."));
+        items.push(ListItem::new("No projects yet."));
     } else {
         for project in projects {
             let marker = if project.id == selected.id { ">" } else { " " };
@@ -193,25 +191,34 @@ fn project_panel(projects: &[Project], selected: &Project, active: bool) -> Para
             } else {
                 Style::default()
             };
-            lines.push(Line::from(vec![Span::styled(
-                format!("{marker} {}", project.name),
+            items.push(ListItem::new(Line::from(vec![Span::styled(
+                truncate_project_label(marker, &project.name),
                 style,
-            )]));
+            )])));
         }
     }
 
-    lines.extend([
-        Line::from(""),
-        Line::from(format!("root: {}", selected.root)),
-        Line::from(""),
-        Line::from("Click project: switch"),
-        Line::from("x: Codex toggle"),
-        Line::from("Tab: next pane, q: quit"),
+    items.extend([
+        ListItem::new(""),
+        ListItem::new(format!("root: {}", selected.root)),
+        ListItem::new(""),
+        ListItem::new("x: Codex toggle"),
+        ListItem::new("Tab: next pane, q: quit"),
     ]);
 
-    Paragraph::new(lines)
-        .block(panel_block("Project", active))
-        .wrap(Wrap { trim: true })
+    List::new(items).block(panel_block("Project", active))
+}
+
+fn truncate_project_label(marker: &str, name: &str) -> String {
+    const MAX_LABEL_CHARS: usize = 28;
+    let label = format!("{marker} {name}");
+    if label.chars().count() <= MAX_LABEL_CHARS {
+        return label;
+    }
+
+    let mut truncated: String = label.chars().take(MAX_LABEL_CHARS - 1).collect();
+    truncated.push('…');
+    truncated
 }
 
 fn todo_panel(todos: &[Todo], active: bool) -> List<'static> {
@@ -326,7 +333,8 @@ impl DashboardLayout {
             return None;
         }
 
-        Some(usize::from(row.saturating_sub(content_top)))
+        let row_offset = usize::from(row.saturating_sub(content_top));
+        row_offset.checked_sub(1)
     }
 }
 
