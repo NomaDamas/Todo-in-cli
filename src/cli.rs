@@ -50,14 +50,27 @@ pub enum Command {
 #[derive(Debug, Subcommand)]
 pub enum TodoCommand {
     Add { title: String },
+    Edit { id: String, title: String },
     List,
     Done { id: String },
+    Delete { id: String },
 }
 
 #[derive(Debug, Subcommand)]
 pub enum RoadmapCommand {
-    Add { title: String },
+    Add {
+        title: String,
+    },
+    Edit {
+        id: String,
+        title: Option<String>,
+        #[arg(long)]
+        status: Option<String>,
+    },
     List,
+    Delete {
+        id: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]

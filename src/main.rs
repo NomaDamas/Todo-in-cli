@@ -38,6 +38,13 @@ async fn main() -> Result<()> {
                 store.save()?;
                 println!("created todo {}: {}", todo.id, todo.title);
             }
+            TodoCommand::Edit { id, title } => {
+                let mut store = Store::open_default_locked()?;
+                let project = store.ensure_current_project()?;
+                let todo = store.update_todo_title(&project.id, &id, title)?;
+                store.save()?;
+                println!("updated todo {}: {}", todo.id, todo.title);
+            }
             TodoCommand::List => {
                 let mut store = Store::open_default()?;
                 let project = store.ensure_current_project()?;
@@ -53,6 +60,13 @@ async fn main() -> Result<()> {
                 store.save()?;
                 println!("completed todo {id}");
             }
+            TodoCommand::Delete { id } => {
+                let mut store = Store::open_default_locked()?;
+                let project = store.ensure_current_project()?;
+                let todo = store.delete_todo(&project.id, &id)?;
+                store.save()?;
+                println!("deleted todo {}: {}", todo.id, todo.title);
+            }
         },
         Command::Roadmap { command } => match command {
             RoadmapCommand::Add { title } => {
@@ -62,12 +76,29 @@ async fn main() -> Result<()> {
                 store.save()?;
                 println!("created roadmap item {}: {}", item.id, item.title);
             }
+            RoadmapCommand::Edit { id, title, status } => {
+                let mut store = Store::open_default_locked()?;
+                let project = store.ensure_current_project()?;
+                let item = store.update_roadmap_item(&project.id, &id, title, status)?;
+                store.save()?;
+                println!(
+                    "updated roadmap item {} [{}] {}",
+                    item.id, item.status, item.title
+                );
+            }
             RoadmapCommand::List => {
                 let mut store = Store::open_default()?;
                 let project = store.ensure_current_project()?;
                 for item in store.roadmap_for_project(&project.id) {
                     println!("{} [{}] {}", item.id, item.status, item.title);
                 }
+            }
+            RoadmapCommand::Delete { id } => {
+                let mut store = Store::open_default_locked()?;
+                let project = store.ensure_current_project()?;
+                let item = store.delete_roadmap_item(&project.id, &id)?;
+                store.save()?;
+                println!("deleted roadmap item {}: {}", item.id, item.title);
             }
         },
         Command::Chat { provider, message } => {

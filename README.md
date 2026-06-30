@@ -31,10 +31,14 @@ cargo run -- tui
 todo-in-cli tui
 todo-in-cli tui --provider claude
 todo-in-cli todo add "Write acceptance tests"
+todo-in-cli todo edit <todo-id> "Write regression tests"
 todo-in-cli todo list
 todo-in-cli todo done <todo-id>
+todo-in-cli todo delete <todo-id>
 todo-in-cli roadmap add "Provider abstraction"
+todo-in-cli roadmap edit <roadmap-id> "Provider abstraction and retries" --status in-progress
 todo-in-cli roadmap list
+todo-in-cli roadmap delete <roadmap-id>
 todo-in-cli chat --provider openai "Draft the next milestone"
 todo-in-cli agent propose '{"tool":"create_todo","title":"Review approval flow"}'
 todo-in-cli agent list
@@ -57,6 +61,9 @@ x                Toggle Codex mode indicator
 q / Esc / Ctrl-C Exit
 Chat pane        Type directly, Enter sends to the selected provider
 ```
+
+Clicking Todos, Roadmap, or Chat only changes focus. The selected project stays active until
+you click a different project in the Project pane.
 
 The TUI renders a terminal-safe Markdown subset:
 
