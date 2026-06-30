@@ -133,6 +133,10 @@ fn read_state(path: &Path) -> Result<AppState> {
 }
 
 impl Store {
+    pub fn projects(&self) -> Vec<Project> {
+        self.state.projects.clone()
+    }
+
     pub fn ensure_current_project(&mut self) -> Result<Project> {
         let root = current_project_root()?;
         let root_string = root.to_string_lossy().to_string();
