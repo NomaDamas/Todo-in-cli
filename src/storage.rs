@@ -214,6 +214,28 @@ impl Store {
         Ok(())
     }
 
+    pub fn update_todo_title(&mut self, project_id: &str, id: &str, title: String) -> Result<Todo> {
+        ensure_non_empty(&title, "todo title")?;
+        let todo = self
+            .state
+            .todos
+            .iter_mut()
+            .find(|todo| todo.project_id == project_id && todo.id == id)
+            .ok_or_else(|| anyhow!("todo not found: {id}"))?;
+        todo.title = title;
+        Ok(todo.clone())
+    }
+
+    pub fn delete_todo(&mut self, project_id: &str, id: &str) -> Result<Todo> {
+        let index = self
+            .state
+            .todos
+            .iter()
+            .position(|todo| todo.project_id == project_id && todo.id == id)
+            .ok_or_else(|| anyhow!("todo not found: {id}"))?;
+        Ok(self.state.todos.remove(index))
+    }
+
     pub fn set_todo_completed_by_issue(
         &mut self,
         project_id: &str,
@@ -345,6 +367,51 @@ impl Store {
             .filter(|item| item.project_id == project_id)
             .cloned()
             .collect()
+    }
+
+    pub fn update_roadmap_item(
+        &mut self,
+        project_id: &str,
+        id: &str,
+        title: Option<String>,
+        status: Option<String>,
+    ) -> Result<RoadmapItem> {
+        if title.is_none() && status.is_none() {
+            return Err(anyhow!("roadmap edit requires a title or --status"));
+        }
+
+        if let Some(title) = &title {
+            ensure_non_empty(title, "roadmap title")?;
+        }
+        if let Some(status) = &status {
+            ensure_non_empty(status, "roadmap status")?;
+        }
+
+        let item = self
+            .state
+            .roadmap
+            .iter_mut()
+            .find(|item| item.project_id == project_id && item.id == id)
+            .ok_or_else(|| anyhow!("roadmap item not found: {id}"))?;
+
+        if let Some(title) = title {
+            item.title = title;
+        }
+        if let Some(status) = status {
+            item.status = status;
+        }
+
+        Ok(item.clone())
+    }
+
+    pub fn delete_roadmap_item(&mut self, project_id: &str, id: &str) -> Result<RoadmapItem> {
+        let index = self
+            .state
+            .roadmap
+            .iter()
+            .position(|item| item.project_id == project_id && item.id == id)
+            .ok_or_else(|| anyhow!("roadmap item not found: {id}"))?;
+        Ok(self.state.roadmap.remove(index))
     }
 
     pub fn add_chat_message(
@@ -608,6 +675,61 @@ mod tests {
         let todos = store.todos_for_project("project");
         assert!(todos[0].completed);
         assert!(todos[0].completed_at.is_some());
+    }
+
+    #[test]
+    fn edits_and_deletes_project_scoped_todos() {
+        let mut store = Store {
+            path: PathBuf::from("unused"),
+            state: AppState::default(),
+            _lock: None,
+        };
+
+        let todo = store.add_todo("project", "draft".to_string()).unwrap();
+        let other = store.add_todo("other", "other draft".to_string()).unwrap();
+
+        let updated = store
+            .update_todo_title("project", &todo.id, "ship".to_string())
+            .unwrap();
+        assert_eq!(updated.title, "ship");
+        assert_eq!(store.todos_for_project("other")[0].title, "other draft");
+
+        let deleted = store.delete_todo("project", &todo.id).unwrap();
+        assert_eq!(deleted.id, todo.id);
+        assert!(store.todos_for_project("project").is_empty());
+        assert_eq!(store.todos_for_project("other")[0].id, other.id);
+    }
+
+    #[test]
+    fn edits_and_deletes_project_scoped_roadmap_items() {
+        let mut store = Store {
+            path: PathBuf::from("unused"),
+            state: AppState::default(),
+            _lock: None,
+        };
+
+        let item = store
+            .add_roadmap_item("project", "mvp".to_string())
+            .unwrap();
+        store
+            .add_roadmap_item("other", "other roadmap".to_string())
+            .unwrap();
+
+        let updated = store
+            .update_roadmap_item(
+                "project",
+                &item.id,
+                Some("beta".to_string()),
+                Some("in-progress".to_string()),
+            )
+            .unwrap();
+        assert_eq!(updated.title, "beta");
+        assert_eq!(updated.status, "in-progress");
+        assert_eq!(store.roadmap_for_project("other")[0].title, "other roadmap");
+
+        let deleted = store.delete_roadmap_item("project", &item.id).unwrap();
+        assert_eq!(deleted.id, item.id);
+        assert!(store.roadmap_for_project("project").is_empty());
     }
 
     #[test]
