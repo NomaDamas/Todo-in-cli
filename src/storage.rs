@@ -180,6 +180,28 @@ impl Store {
         Ok(todo)
     }
 
+    pub fn add_todo_from_github(
+        &mut self,
+        project_id: &str,
+        title: String,
+        issue: u64,
+        closed: bool,
+    ) -> Result<Todo> {
+        let mut todo = self.add_todo(project_id, title)?;
+        todo.github_issue = Some(issue);
+        todo.completed = closed;
+        todo.completed_at = closed.then(Utc::now);
+        if let Some(stored) = self
+            .state
+            .todos
+            .iter_mut()
+            .find(|stored| stored.id == todo.id && stored.project_id == project_id)
+        {
+            *stored = todo.clone();
+        }
+        Ok(todo)
+    }
+
     pub fn complete_todo(&mut self, project_id: &str, id: &str) -> Result<()> {
         let todo = self
             .state
@@ -190,6 +212,47 @@ impl Store {
         todo.completed = true;
         todo.completed_at = Some(Utc::now());
         Ok(())
+    }
+
+    pub fn set_todo_completed_by_issue(
+        &mut self,
+        project_id: &str,
+        issue: u64,
+        completed: bool,
+    ) -> Result<bool> {
+        let Some(todo) = self
+            .state
+            .todos
+            .iter_mut()
+            .find(|todo| todo.project_id == project_id && todo.github_issue == Some(issue))
+        else {
+            return Ok(false);
+        };
+
+        todo.completed = completed;
+        todo.completed_at = completed.then(Utc::now);
+        Ok(true)
+    }
+
+    pub fn link_matching_todo_from_github(
+        &mut self,
+        project_id: &str,
+        title: &str,
+        issue: u64,
+        closed: bool,
+    ) -> Result<bool> {
+        let Some(todo) = self.state.todos.iter_mut().find(|todo| {
+            todo.project_id == project_id
+                && todo.github_issue.is_none()
+                && todo.title.eq_ignore_ascii_case(title)
+        }) else {
+            return Ok(false);
+        };
+
+        todo.github_issue = Some(issue);
+        todo.completed = closed;
+        todo.completed_at = closed.then(Utc::now);
+        Ok(true)
     }
 
     pub fn todos_for_project(&self, project_id: &str) -> Vec<Todo> {
@@ -213,6 +276,66 @@ impl Store {
         };
         self.state.roadmap.push(item.clone());
         Ok(item)
+    }
+
+    pub fn add_roadmap_from_github(
+        &mut self,
+        project_id: &str,
+        title: String,
+        issue: u64,
+        closed: bool,
+    ) -> Result<RoadmapItem> {
+        let mut item = self.add_roadmap_item(project_id, title)?;
+        item.github_issue = Some(issue);
+        item.status = if closed { "done" } else { "planned" }.to_string();
+        if let Some(stored) = self
+            .state
+            .roadmap
+            .iter_mut()
+            .find(|stored| stored.id == item.id && stored.project_id == project_id)
+        {
+            *stored = item.clone();
+        }
+        Ok(item)
+    }
+
+    pub fn set_roadmap_status_by_issue(
+        &mut self,
+        project_id: &str,
+        issue: u64,
+        status: String,
+    ) -> Result<bool> {
+        let Some(item) = self
+            .state
+            .roadmap
+            .iter_mut()
+            .find(|item| item.project_id == project_id && item.github_issue == Some(issue))
+        else {
+            return Ok(false);
+        };
+
+        item.status = status;
+        Ok(true)
+    }
+
+    pub fn link_matching_roadmap_from_github(
+        &mut self,
+        project_id: &str,
+        title: &str,
+        issue: u64,
+        closed: bool,
+    ) -> Result<bool> {
+        let Some(item) = self.state.roadmap.iter_mut().find(|item| {
+            item.project_id == project_id
+                && item.github_issue.is_none()
+                && item.title.eq_ignore_ascii_case(title)
+        }) else {
+            return Ok(false);
+        };
+
+        item.github_issue = Some(issue);
+        item.status = if closed { "done" } else { "planned" }.to_string();
+        Ok(true)
     }
 
     pub fn roadmap_for_project(&self, project_id: &str) -> Vec<RoadmapItem> {
@@ -527,6 +650,66 @@ mod tests {
 
         assert_eq!(store.todos_for_project("project")[0].github_issue, Some(9));
         assert!(store.unsynced_todos("project").is_empty());
+    }
+
+    #[test]
+    fn imports_and_updates_github_backed_items() {
+        let mut store = Store {
+            path: PathBuf::from("unused"),
+            state: AppState::default(),
+            _lock: None,
+        };
+
+        store
+            .add_todo_from_github("project", "remote todo".to_string(), 10, false)
+            .unwrap();
+        store
+            .add_roadmap_from_github("project", "remote roadmap".to_string(), 11, true)
+            .unwrap();
+        store
+            .set_todo_completed_by_issue("project", 10, true)
+            .unwrap();
+        store
+            .set_roadmap_status_by_issue("project", 11, "planned".to_string())
+            .unwrap();
+        assert!(
+            !store
+                .link_matching_todo_from_github("project", "remote todo", 12, false)
+                .unwrap()
+        );
+
+        assert!(store.todos_for_project("project")[0].completed);
+        assert_eq!(store.roadmap_for_project("project")[0].status, "planned");
+    }
+
+    #[test]
+    fn links_matching_unsynced_github_items() {
+        let mut store = Store {
+            path: PathBuf::from("unused"),
+            state: AppState::default(),
+            _lock: None,
+        };
+
+        store.add_todo("project", "same title".to_string()).unwrap();
+        store
+            .add_roadmap_item("project", "same roadmap".to_string())
+            .unwrap();
+
+        assert!(
+            store
+                .link_matching_todo_from_github("project", "Same Title", 20, true)
+                .unwrap()
+        );
+        assert!(
+            store
+                .link_matching_roadmap_from_github("project", "Same Roadmap", 21, false)
+                .unwrap()
+        );
+        assert_eq!(store.todos_for_project("project")[0].github_issue, Some(20));
+        assert_eq!(
+            store.roadmap_for_project("project")[0].github_issue,
+            Some(21)
+        );
     }
 
     #[test]

@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod api;
 pub mod cli;
+pub mod codex;
 pub mod github;
 pub mod llm;
 pub mod markdown;

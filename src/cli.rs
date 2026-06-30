@@ -10,7 +10,10 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Open the terminal dashboard.
-    Tui,
+    Tui {
+        #[arg(long, value_enum, default_value_t = ProviderKind::Openai)]
+        provider: ProviderKind,
+    },
     /// Manage project-scoped todos.
     Todo {
         #[command(subcommand)]
@@ -87,6 +90,14 @@ pub enum GithubCommand {
     Sync {
         #[arg(long, value_enum, default_value_t = SyncKind::All)]
         kind: SyncKind,
+        #[arg(long)]
+        dry_run: bool,
+        /// Also pull matching GitHub Issues back into local state.
+        #[arg(long)]
+        pull: bool,
+    },
+    /// Pull matching GitHub Issues back into local state.
+    Pull {
         #[arg(long)]
         dry_run: bool,
     },

@@ -22,6 +22,19 @@ pub fn render_lines(input: &str) -> Vec<Line<'static>> {
                 spans.extend(inline_segments(text));
                 return Line::from(spans);
             }
+            if let Some((number, text)) = numbered_item(trimmed) {
+                let mut spans = vec![Span::styled(
+                    format!("{number}. "),
+                    Style::default().fg(Color::Yellow),
+                )];
+                spans.extend(inline_segments(text));
+                return Line::from(spans);
+            }
+            if let Some(text) = trimmed.strip_prefix("> ") {
+                let mut spans = vec![Span::styled("│ ", Style::default().fg(Color::DarkGray))];
+                spans.extend(inline_segments(text));
+                return Line::from(spans);
+            }
             Line::from(inline_segments(trimmed))
         })
         .collect();
@@ -51,23 +64,29 @@ fn inline_segments(input: &str) -> Vec<Span<'static>> {
     while !rest.is_empty() {
         let bold = rest.find("**");
         let code = rest.find('`');
-        let next = match (bold, code) {
-            (Some(bold), Some(code)) if bold < code => ("bold", bold),
-            (Some(_), Some(code)) => ("code", code),
-            (Some(bold), None) => ("bold", bold),
-            (None, Some(code)) => ("code", code),
-            (None, None) => {
-                spans.push(Span::raw(rest.to_string()));
-                break;
-            }
+        let strike = rest.find("~~");
+        let link = rest.find('[');
+        let next = [
+            bold.map(|index| ("bold", index)),
+            code.map(|index| ("code", index)),
+            strike.map(|index| ("strike", index)),
+            link.map(|index| ("link", index)),
+        ]
+        .into_iter()
+        .flatten()
+        .min_by_key(|(_, index)| *index);
+
+        let Some((kind, index)) = next else {
+            spans.push(Span::raw(rest.to_string()));
+            break;
         };
 
-        if next.1 > 0 {
-            spans.push(Span::raw(rest[..next.1].to_string()));
+        if index > 0 {
+            spans.push(Span::raw(rest[..index].to_string()));
         }
 
-        if next.0 == "bold" {
-            let after = &rest[next.1 + 2..];
+        if kind == "bold" {
+            let after = &rest[index + 2..];
             if let Some(end) = after.find("**") {
                 spans.push(Span::styled(
                     after[..end].to_string(),
@@ -75,11 +94,11 @@ fn inline_segments(input: &str) -> Vec<Span<'static>> {
                 ));
                 rest = &after[end + 2..];
             } else {
-                spans.push(Span::raw(rest[next.1..].to_string()));
+                spans.push(Span::raw(rest[index..].to_string()));
                 break;
             }
-        } else {
-            let after = &rest[next.1 + 1..];
+        } else if kind == "code" {
+            let after = &rest[index + 1..];
             if let Some(end) = after.find('`') {
                 spans.push(Span::styled(
                     after[..end].to_string(),
@@ -87,13 +106,59 @@ fn inline_segments(input: &str) -> Vec<Span<'static>> {
                 ));
                 rest = &after[end + 1..];
             } else {
-                spans.push(Span::raw(rest[next.1..].to_string()));
+                spans.push(Span::raw(rest[index..].to_string()));
                 break;
             }
+        } else if kind == "strike" {
+            let after = &rest[index + 2..];
+            if let Some(end) = after.find("~~") {
+                spans.push(Span::styled(
+                    after[..end].to_string(),
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::CROSSED_OUT),
+                ));
+                rest = &after[end + 2..];
+            } else {
+                spans.push(Span::raw(rest[index..].to_string()));
+                break;
+            }
+        } else if let Some((label, url, consumed)) = parse_link(&rest[index..]) {
+            spans.push(Span::styled(
+                format!("{label} ({url})"),
+                Style::default().fg(Color::Blue),
+            ));
+            rest = &rest[index + consumed..];
+        } else {
+            spans.push(Span::raw(rest[index..=index].to_string()));
+            rest = &rest[index + 1..];
         }
     }
 
     spans
+}
+
+fn numbered_item(input: &str) -> Option<(&str, &str)> {
+    let (number, rest) = input.split_once(". ")?;
+    number
+        .chars()
+        .all(|ch| ch.is_ascii_digit())
+        .then_some((number, rest))
+}
+
+fn parse_link(input: &str) -> Option<(&str, &str, usize)> {
+    let label_end = input.find("](")?;
+    if !input.starts_with('[') {
+        return None;
+    }
+    let after_label = label_end + 2;
+    let url_end = input[after_label..].find(')')? + after_label;
+    let label = &input[1..label_end];
+    let url = &input[after_label..url_end];
+    if label.is_empty() || url.is_empty() {
+        return None;
+    }
+    Some((label, url, url_end + 1))
 }
 
 #[cfg(test)]
@@ -104,6 +169,14 @@ mod tests {
     fn renders_heading_and_body() {
         let lines = render_lines("# Title\n- **todo** `cmd`");
         assert_eq!(lines.len(), 2);
+        assert!(lines[1].spans.len() > 2);
+    }
+
+    #[test]
+    fn renders_expanded_markdown_subset() {
+        let lines = render_lines("> [Docs](https://example.com)\n1. ~~old~~ **new**");
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].spans.len() > 1);
         assert!(lines[1].spans.len() > 2);
     }
 }

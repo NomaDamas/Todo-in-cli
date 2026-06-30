@@ -17,6 +17,9 @@ todo-in-cli github sync --dry-run
 todo-in-cli github sync --kind todos
 todo-in-cli github sync --kind roadmap
 todo-in-cli github sync --kind all
+todo-in-cli github sync --pull
+todo-in-cli github pull --dry-run
+todo-in-cli github pull
 ```
 
 ## Behavior
@@ -26,6 +29,8 @@ todo-in-cli github sync --kind all
 - The local item stores the created issue number.
 - Already linked items are skipped on later syncs.
 - `--dry-run` prints intended publishes without creating issues.
+- `github pull` imports matching `[todo]` and `[roadmap]` issues.
+- `github sync --pull` publishes local unsynced items, then pulls matching issues back.
 
 ## Failure Safety
 

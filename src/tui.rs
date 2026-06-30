@@ -16,8 +16,9 @@ use ratatui::{
 };
 
 use crate::{
-    markdown,
-    models::{AgentActionStatus, Project, RoadmapItem, Todo},
+    cli::ProviderKind,
+    codex, llm, markdown,
+    models::{AgentActionStatus, ChatMessage, Project, RoadmapItem, Todo},
     storage::Store,
 };
 
@@ -29,14 +30,14 @@ enum Pane {
     Chat,
 }
 
-pub fn run(store: &Store, project: Project) -> Result<()> {
+pub fn run(project: Project, provider: ProviderKind) -> Result<()> {
     let mut stdout = std::io::stdout();
     enable_raw_mode()?;
     execute!(stdout, EnterAlternateScreen, event::EnableMouseCapture)?;
 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
-    let result = run_loop(&mut terminal, store, project);
+    let result = run_loop(&mut terminal, project, provider);
 
     disable_raw_mode()?;
     execute!(
@@ -51,20 +52,31 @@ pub fn run(store: &Store, project: Project) -> Result<()> {
 
 fn run_loop(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
-    store: &Store,
     project: Project,
+    provider: ProviderKind,
 ) -> Result<()> {
-    let projects = store.projects();
     let mut current_project = project;
     let mut codex_enabled = false;
+    let mut chat_input = String::new();
+    let mut status = "Chat pane: type and press Enter. x toggles Codex.".to_string();
     let mut active = Pane::Todos;
     let mut layout = DashboardLayout::default();
 
     loop {
-        let todos = store.todos_for_project(&current_project.id);
-        let roadmap = store.roadmap_for_project(&current_project.id);
-        let chat = store.chat_for_project(&current_project.id);
-        let pending_actions = store
+        let view_store = Store::open_default()?;
+        let projects = view_store.projects();
+        if let Some(project) = projects
+            .iter()
+            .find(|project| project.id == current_project.id)
+            .cloned()
+            .or_else(|| projects.first().cloned())
+        {
+            current_project = project;
+        }
+        let todos = view_store.todos_for_project(&current_project.id);
+        let roadmap = view_store.roadmap_for_project(&current_project.id);
+        let chat = view_store.chat_for_project(&current_project.id);
+        let pending_actions = view_store
             .agent_actions_for_project(&current_project.id)
             .iter()
             .filter(|action| matches!(action.status, AgentActionStatus::Pending))
@@ -79,7 +91,9 @@ fn run_loop(
                     project: &current_project,
                     todos: &todos,
                     roadmap: &roadmap,
-                    chat_count: chat.len(),
+                    chat_messages: &chat,
+                    chat_input: &chat_input,
+                    status: &status,
                     pending_actions,
                     codex_enabled,
                 },
@@ -92,9 +106,45 @@ fn run_loop(
 
         match event::read()? {
             Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
-                KeyCode::Char('q') | KeyCode::Esc => break,
+                KeyCode::Char('q') if active != Pane::Chat => break,
+                KeyCode::Esc => break,
                 KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => break,
-                KeyCode::Char('x') => codex_enabled = !codex_enabled,
+                KeyCode::Char('x') if active != Pane::Chat => codex_enabled = !codex_enabled,
+                KeyCode::Enter if active == Pane::Chat && !chat_input.trim().is_empty() => {
+                    status = "sending chat message...".to_string();
+                    terminal.draw(|frame| {
+                        layout = draw_dashboard(
+                            frame,
+                            DashboardView {
+                                active,
+                                projects: &projects,
+                                project: &current_project,
+                                todos: &todos,
+                                roadmap: &roadmap,
+                                chat_messages: &chat,
+                                chat_input: &chat_input,
+                                status: &status,
+                                pending_actions,
+                                codex_enabled,
+                            },
+                        );
+                    })?;
+
+                    match send_chat_message(provider, codex_enabled, &current_project, &chat_input)
+                    {
+                        Ok(message) => {
+                            status = message;
+                            chat_input.clear();
+                        }
+                        Err(error) => status = format!("chat failed: {error}"),
+                    }
+                }
+                KeyCode::Backspace if active == Pane::Chat => {
+                    chat_input.pop();
+                }
+                KeyCode::Char(ch) if active == Pane::Chat => {
+                    chat_input.push(ch);
+                }
                 KeyCode::Tab => active = next_pane(active),
                 KeyCode::BackTab => active = previous_pane(active),
                 _ => {}
@@ -151,7 +201,9 @@ fn draw_dashboard(frame: &mut ratatui::Frame, view: DashboardView<'_>) -> Dashbo
     );
     frame.render_widget(
         chat_panel(
-            view.chat_count,
+            view.chat_messages,
+            view.chat_input,
+            view.status,
             view.pending_actions,
             view.codex_enabled,
             view.active == Pane::Chat,
@@ -168,7 +220,9 @@ struct DashboardView<'a> {
     project: &'a Project,
     todos: &'a [Todo],
     roadmap: &'a [RoadmapItem],
-    chat_count: usize,
+    chat_messages: &'a [ChatMessage],
+    chat_input: &'a str,
+    status: &'a str,
     pending_actions: usize,
     codex_enabled: bool,
 }
@@ -256,18 +310,67 @@ fn roadmap_panel(roadmap: &[RoadmapItem], active: bool) -> List<'static> {
 }
 
 fn chat_panel(
-    chat_count: usize,
+    messages: &[ChatMessage],
+    input: &str,
+    status: &str,
     pending_actions: usize,
     codex_enabled: bool,
     active: bool,
 ) -> Paragraph<'static> {
     let codex = if codex_enabled { "**on**" } else { "`off`" };
-    let content = format!(
-        "Agent chat is available from CLI in this MVP:\n`todo-in-cli chat --provider openai \"plan next steps\"`\nPersisted project chat messages: **{chat_count}**\nPending approval actions: **{pending_actions}**\nCodex mode: {codex}  `(x toggles)`"
-    );
-    Paragraph::new(markdown::render_lines(&content))
+    let mut lines = markdown::render_lines(&format!(
+        "Codex mode: {codex} `(x toggles)`  Pending approvals: **{pending_actions}**"
+    ));
+    lines.push(Line::from(""));
+    for message in messages.iter().rev().take(4).rev() {
+        lines.extend(markdown::render_lines(&format!(
+            "**{}**: {}",
+            message.role, message.content
+        )));
+    }
+    lines.push(Line::from(""));
+    lines.extend(markdown::render_lines(status));
+    lines.push(markdown::render_inline(&format!("> {input}")));
+
+    Paragraph::new(lines)
         .block(panel_block("Agent Chat", active))
         .wrap(Wrap { trim: true })
+}
+
+fn send_chat_message(
+    provider: ProviderKind,
+    codex_enabled: bool,
+    project: &Project,
+    input: &str,
+) -> Result<String> {
+    let user_message = input.trim().to_string();
+    let response = if codex_enabled {
+        codex::chat(project, &user_message)?
+    } else {
+        let project_name = project.name.clone();
+        let request_message = user_message.clone();
+        std::thread::spawn(move || -> Result<String> {
+            let runtime = tokio::runtime::Runtime::new()?;
+            runtime.block_on(async move {
+                let client = llm::provider_from_env(provider)?;
+                let response = client
+                    .chat(llm::ChatRequest {
+                        project_name,
+                        message: request_message,
+                    })
+                    .await?;
+                Ok(response.message)
+            })
+        })
+        .join()
+        .map_err(|_| anyhow::anyhow!("chat worker panicked"))??
+    };
+
+    let mut store = Store::open_default_locked()?;
+    store.add_chat_message(&project.id, "user", user_message)?;
+    store.add_chat_message(&project.id, "assistant", response)?;
+    store.save()?;
+    Ok("chat response saved".to_string())
 }
 
 fn panel_block(title: &'static str, active: bool) -> Block<'static> {
