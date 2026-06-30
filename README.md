@@ -8,6 +8,9 @@ This repository is starting with an MVP implementation:
 
 - Project-aware todos and roadmap items.
 - tmux-friendly `ratatui` dashboard.
+- Mouse-click project switching in the TUI project pane.
+- TUI Codex mode toggle with `x`.
+- Terminal-friendly Markdown subset rendering in TUI text.
 - CLI commands for local workflows.
 - Provider abstraction for GPT, Claude, Gemini, and Grok chat.
 - Agent approval flow for safe assistant-proposed mutations.
@@ -40,6 +43,23 @@ todo-in-cli api snapshot
 todo-in-cli github sync --dry-run
 todo-in-cli github sync --kind todos
 ```
+
+## TUI Controls
+
+```text
+Tab / Shift-Tab  Move focus between panes
+Mouse click      Focus a pane
+Project click    Switch the active project in the Project pane
+x                Toggle Codex mode indicator
+q / Esc / Ctrl-C Exit
+```
+
+The TUI renders a terminal-safe Markdown subset:
+
+- headings: `#`, `##`, `###`
+- bullets: `- item`
+- bold: `**text**`
+- inline code: `` `command` ``
 
 ## LLM Provider Environment Variables
 

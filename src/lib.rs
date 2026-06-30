@@ -3,6 +3,7 @@ pub mod api;
 pub mod cli;
 pub mod github;
 pub mod llm;
+pub mod markdown;
 pub mod models;
 pub mod storage;
 pub mod tui;

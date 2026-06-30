@@ -16,6 +16,7 @@ use ratatui::{
 };
 
 use crate::{
+    markdown,
     models::{AgentActionStatus, Project, RoadmapItem, Todo},
     storage::Store,
 };
@@ -53,15 +54,18 @@ fn run_loop(
     store: &Store,
     project: Project,
 ) -> Result<()> {
+    let projects = store.projects();
+    let mut current_project = project;
+    let mut codex_enabled = false;
     let mut active = Pane::Todos;
     let mut layout = DashboardLayout::default();
 
     loop {
-        let todos = store.todos_for_project(&project.id);
-        let roadmap = store.roadmap_for_project(&project.id);
-        let chat = store.chat_for_project(&project.id);
+        let todos = store.todos_for_project(&current_project.id);
+        let roadmap = store.roadmap_for_project(&current_project.id);
+        let chat = store.chat_for_project(&current_project.id);
         let pending_actions = store
-            .agent_actions_for_project(&project.id)
+            .agent_actions_for_project(&current_project.id)
             .iter()
             .filter(|action| matches!(action.status, AgentActionStatus::Pending))
             .count();
@@ -69,12 +73,16 @@ fn run_loop(
         terminal.draw(|frame| {
             layout = draw_dashboard(
                 frame,
-                active,
-                &project,
-                &todos,
-                &roadmap,
-                chat.len(),
-                pending_actions,
+                DashboardView {
+                    active,
+                    projects: &projects,
+                    project: &current_project,
+                    todos: &todos,
+                    roadmap: &roadmap,
+                    chat_count: chat.len(),
+                    pending_actions,
+                    codex_enabled,
+                },
             );
         })?;
 
@@ -86,12 +94,19 @@ fn run_loop(
             Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
                 KeyCode::Char('q') | KeyCode::Esc => break,
                 KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => break,
+                KeyCode::Char('x') => codex_enabled = !codex_enabled,
                 KeyCode::Tab => active = next_pane(active),
                 KeyCode::BackTab => active = previous_pane(active),
                 _ => {}
             },
             Event::Mouse(mouse) if mouse.kind == MouseEventKind::Down(MouseButton::Left) => {
                 active = layout.pane_at(mouse.column, mouse.row).unwrap_or(active);
+                if active == Pane::Project
+                    && let Some(index) = layout.project_index_at(mouse.column, mouse.row)
+                    && let Some(project) = projects.get(index)
+                {
+                    current_project = project.clone();
+                }
             }
             _ => {}
         }
@@ -100,15 +115,7 @@ fn run_loop(
     Ok(())
 }
 
-fn draw_dashboard(
-    frame: &mut ratatui::Frame,
-    active: Pane,
-    project: &Project,
-    todos: &[Todo],
-    roadmap: &[RoadmapItem],
-    chat_count: usize,
-    pending_actions: usize,
-) -> DashboardLayout {
+fn draw_dashboard(frame: &mut ratatui::Frame, view: DashboardView<'_>) -> DashboardLayout {
     let root = frame.area();
     let vertical = Layout::default()
         .direction(Direction::Vertical)
@@ -131,37 +138,77 @@ fn draw_dashboard(
     };
 
     frame.render_widget(
-        project_panel(project, active == Pane::Project),
+        project_panel(view.projects, view.project, view.active == Pane::Project),
         layout.project,
     );
-    frame.render_widget(todo_panel(todos, active == Pane::Todos), layout.todos);
     frame.render_widget(
-        roadmap_panel(roadmap, active == Pane::Roadmap),
+        todo_panel(view.todos, view.active == Pane::Todos),
+        layout.todos,
+    );
+    frame.render_widget(
+        roadmap_panel(view.roadmap, view.active == Pane::Roadmap),
         layout.roadmap,
     );
     frame.render_widget(
-        chat_panel(chat_count, pending_actions, active == Pane::Chat),
+        chat_panel(
+            view.chat_count,
+            view.pending_actions,
+            view.codex_enabled,
+            view.active == Pane::Chat,
+        ),
         layout.chat,
     );
 
     layout
 }
 
-fn project_panel(project: &Project, active: bool) -> Paragraph<'static> {
-    let lines = vec![
-        Line::from(vec![Span::styled(
-            project.name.clone(),
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )]),
+struct DashboardView<'a> {
+    active: Pane,
+    projects: &'a [Project],
+    project: &'a Project,
+    todos: &'a [Todo],
+    roadmap: &'a [RoadmapItem],
+    chat_count: usize,
+    pending_actions: usize,
+    codex_enabled: bool,
+}
+
+fn project_panel(projects: &[Project], selected: &Project, active: bool) -> Paragraph<'static> {
+    let mut lines = vec![Line::from(vec![Span::styled(
+        "Projects",
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    )])];
+
+    if projects.is_empty() {
+        lines.push(Line::from("No projects yet."));
+    } else {
+        for project in projects {
+            let marker = if project.id == selected.id { ">" } else { " " };
+            let style = if project.id == selected.id {
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
+            lines.push(Line::from(vec![Span::styled(
+                format!("{marker} {}", project.name),
+                style,
+            )]));
+        }
+    }
+
+    lines.extend([
         Line::from(""),
-        Line::from(format!("root: {}", project.root)),
+        Line::from(format!("root: {}", selected.root)),
         Line::from(""),
-        Line::from("Tab: next pane"),
-        Line::from("Mouse: focus pane"),
-        Line::from("q/Esc: quit"),
-    ];
+        Line::from("Click project: switch"),
+        Line::from("x: Codex toggle"),
+        Line::from("Tab: next pane, q: quit"),
+    ]);
+
     Paragraph::new(lines)
         .block(panel_block("Project", active))
         .wrap(Wrap { trim: true })
@@ -175,7 +222,10 @@ fn todo_panel(todos: &[Todo], active: bool) -> List<'static> {
             .iter()
             .map(|todo| {
                 let marker = if todo.completed { "[x]" } else { "[ ]" };
-                ListItem::new(format!("{marker} {} {}", todo.id, todo.title))
+                ListItem::new(markdown::render_inline(&format!(
+                    "{marker} {} {}",
+                    todo.id, todo.title
+                )))
             })
             .collect()
     };
@@ -190,21 +240,30 @@ fn roadmap_panel(roadmap: &[RoadmapItem], active: bool) -> List<'static> {
     } else {
         roadmap
             .iter()
-            .map(|item| ListItem::new(format!("{} [{}] {}", item.id, item.status, item.title)))
+            .map(|item| {
+                ListItem::new(markdown::render_inline(&format!(
+                    "{} [{}] {}",
+                    item.id, item.status, item.title
+                )))
+            })
             .collect()
     };
     List::new(items).block(panel_block("Roadmap", active))
 }
 
-fn chat_panel(chat_count: usize, pending_actions: usize, active: bool) -> Paragraph<'static> {
-    Paragraph::new(vec![
-        Line::from("Agent chat is available from CLI in this MVP:"),
-        Line::from("todo-in-cli chat --provider openai \"plan next steps\""),
-        Line::from(format!("Persisted project chat messages: {chat_count}")),
-        Line::from(format!("Pending approval actions: {pending_actions}")),
-    ])
-    .block(panel_block("Agent Chat", active))
-    .wrap(Wrap { trim: true })
+fn chat_panel(
+    chat_count: usize,
+    pending_actions: usize,
+    codex_enabled: bool,
+    active: bool,
+) -> Paragraph<'static> {
+    let codex = if codex_enabled { "**on**" } else { "`off`" };
+    let content = format!(
+        "Agent chat is available from CLI in this MVP:\n`todo-in-cli chat --provider openai \"plan next steps\"`\nPersisted project chat messages: **{chat_count}**\nPending approval actions: **{pending_actions}**\nCodex mode: {codex}  `(x toggles)`"
+    );
+    Paragraph::new(markdown::render_lines(&content))
+        .block(panel_block("Agent Chat", active))
+        .wrap(Wrap { trim: true })
 }
 
 fn panel_block(title: &'static str, active: bool) -> Block<'static> {
@@ -255,6 +314,19 @@ impl DashboardLayout {
         ]
         .into_iter()
         .find_map(|(pane, rect)| contains(rect, column, row).then_some(pane))
+    }
+
+    fn project_index_at(&self, column: u16, row: u16) -> Option<usize> {
+        if !contains(self.project, column, row) {
+            return None;
+        }
+
+        let content_top = self.project.y.saturating_add(2);
+        if row < content_top {
+            return None;
+        }
+
+        Some(usize::from(row.saturating_sub(content_top)))
     }
 }
 
