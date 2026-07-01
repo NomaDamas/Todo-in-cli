@@ -30,6 +30,13 @@ enum Pane {
     Chat,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum InputMode {
+    None,
+    Todo,
+    Roadmap,
+}
+
 pub fn run(project: Project, provider: ProviderKind) -> Result<()> {
     let mut stdout = std::io::stdout();
     enable_raw_mode()?;
@@ -58,7 +65,10 @@ fn run_loop(
     let mut current_project = project;
     let mut codex_enabled = false;
     let mut chat_input = String::new();
-    let mut status = "Chat pane: type and press Enter. x toggles Codex.".to_string();
+    let mut todo_input = String::new();
+    let mut roadmap_input = String::new();
+    let mut input_mode = InputMode::None;
+    let mut status = "Todos/Roadmap: press a to add. Chat pane: type and press Enter.".to_string();
     let mut active = Pane::Todos;
     let mut layout = DashboardLayout::default();
 
@@ -93,9 +103,12 @@ fn run_loop(
                     roadmap: &roadmap,
                     chat_messages: &chat,
                     chat_input: &chat_input,
+                    todo_input: &todo_input,
+                    roadmap_input: &roadmap_input,
                     status: &status,
                     pending_actions,
                     codex_enabled,
+                    input_mode,
                 },
             );
         })?;
@@ -106,10 +119,62 @@ fn run_loop(
 
         match event::read()? {
             Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
+                KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => break,
+                KeyCode::Esc if input_mode != InputMode::None => {
+                    input_mode = InputMode::None;
+                    todo_input.clear();
+                    roadmap_input.clear();
+                    status = "input cancelled".to_string();
+                }
+                KeyCode::Enter
+                    if input_mode == InputMode::Todo && !todo_input.trim().is_empty() =>
+                {
+                    match add_todo_from_tui(&current_project, &todo_input) {
+                        Ok(message) => {
+                            status = message;
+                            todo_input.clear();
+                            input_mode = InputMode::None;
+                        }
+                        Err(error) => status = format!("todo add failed: {error}"),
+                    }
+                }
+                KeyCode::Enter
+                    if input_mode == InputMode::Roadmap && !roadmap_input.trim().is_empty() =>
+                {
+                    match add_roadmap_from_tui(&current_project, &roadmap_input) {
+                        Ok(message) => {
+                            status = message;
+                            roadmap_input.clear();
+                            input_mode = InputMode::None;
+                        }
+                        Err(error) => status = format!("roadmap add failed: {error}"),
+                    }
+                }
+                KeyCode::Backspace if input_mode == InputMode::Todo => {
+                    todo_input.pop();
+                }
+                KeyCode::Backspace if input_mode == InputMode::Roadmap => {
+                    roadmap_input.pop();
+                }
+                KeyCode::Char(ch) if input_mode == InputMode::Todo => {
+                    todo_input.push(ch);
+                }
+                KeyCode::Char(ch) if input_mode == InputMode::Roadmap => {
+                    roadmap_input.push(ch);
+                }
                 KeyCode::Char('q') if active != Pane::Chat => break,
                 KeyCode::Esc => break,
-                KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => break,
                 KeyCode::Char('x') if active != Pane::Chat => codex_enabled = !codex_enabled,
+                KeyCode::Char('a') if active == Pane::Todos => {
+                    input_mode = InputMode::Todo;
+                    todo_input.clear();
+                    status = "adding todo: type a title, Enter saves, Esc cancels".to_string();
+                }
+                KeyCode::Char('a') if active == Pane::Roadmap => {
+                    input_mode = InputMode::Roadmap;
+                    roadmap_input.clear();
+                    status = "adding roadmap: type a title, Enter saves, Esc cancels".to_string();
+                }
                 KeyCode::Enter if active == Pane::Chat && !chat_input.trim().is_empty() => {
                     status = "sending chat message...".to_string();
                     terminal.draw(|frame| {
@@ -123,9 +188,12 @@ fn run_loop(
                                 roadmap: &roadmap,
                                 chat_messages: &chat,
                                 chat_input: &chat_input,
+                                todo_input: &todo_input,
+                                roadmap_input: &roadmap_input,
                                 status: &status,
                                 pending_actions,
                                 codex_enabled,
+                                input_mode,
                             },
                         );
                     })?;
@@ -150,7 +218,13 @@ fn run_loop(
                 _ => {}
             },
             Event::Mouse(mouse) if mouse.kind == MouseEventKind::Down(MouseButton::Left) => {
-                active = layout.pane_at(mouse.column, mouse.row).unwrap_or(active);
+                let clicked = layout.pane_at(mouse.column, mouse.row).unwrap_or(active);
+                if clicked != active {
+                    input_mode = InputMode::None;
+                    todo_input.clear();
+                    roadmap_input.clear();
+                }
+                active = clicked;
                 if active == Pane::Project
                     && let Some(index) = layout.project_index_at(mouse.column, mouse.row)
                     && let Some(project) = projects.get(index)
@@ -192,11 +266,21 @@ fn draw_dashboard(frame: &mut ratatui::Frame, view: DashboardView<'_>) -> Dashbo
         layout.project,
     );
     frame.render_widget(
-        todo_panel(view.todos, view.active == Pane::Todos),
+        todo_panel(
+            view.todos,
+            view.todo_input,
+            view.input_mode == InputMode::Todo,
+            view.active == Pane::Todos,
+        ),
         layout.todos,
     );
     frame.render_widget(
-        roadmap_panel(view.roadmap, view.active == Pane::Roadmap),
+        roadmap_panel(
+            view.roadmap,
+            view.roadmap_input,
+            view.input_mode == InputMode::Roadmap,
+            view.active == Pane::Roadmap,
+        ),
         layout.roadmap,
     );
     frame.render_widget(
@@ -222,9 +306,12 @@ struct DashboardView<'a> {
     roadmap: &'a [RoadmapItem],
     chat_messages: &'a [ChatMessage],
     chat_input: &'a str,
+    todo_input: &'a str,
+    roadmap_input: &'a str,
     status: &'a str,
     pending_actions: usize,
     codex_enabled: bool,
+    input_mode: InputMode,
 }
 
 fn project_panel(projects: &[Project], selected: &Project, active: bool) -> List<'static> {
@@ -272,8 +359,8 @@ fn truncate_project_label(marker: &str, name: &str) -> String {
     truncated
 }
 
-fn todo_panel(todos: &[Todo], active: bool) -> List<'static> {
-    let items = if todos.is_empty() {
+fn todo_panel(todos: &[Todo], input: &str, adding: bool, active: bool) -> List<'static> {
+    let mut items = if todos.is_empty() {
         vec![ListItem::new("No todos yet. Use `todo-in-cli todo add`.")]
     } else {
         todos
@@ -287,11 +374,27 @@ fn todo_panel(todos: &[Todo], active: bool) -> List<'static> {
             })
             .collect()
     };
+
+    items.push(ListItem::new(""));
+    if adding {
+        items.push(ListItem::new(markdown::render_inline(&format!(
+            "> add todo: {input}"
+        ))));
+        items.push(ListItem::new("Enter saves, Esc cancels"));
+    } else {
+        items.push(ListItem::new("a: add todo"));
+    }
+
     List::new(items).block(panel_block("Todos", active))
 }
 
-fn roadmap_panel(roadmap: &[RoadmapItem], active: bool) -> List<'static> {
-    let items = if roadmap.is_empty() {
+fn roadmap_panel(
+    roadmap: &[RoadmapItem],
+    input: &str,
+    adding: bool,
+    active: bool,
+) -> List<'static> {
+    let mut items = if roadmap.is_empty() {
         vec![ListItem::new(
             "No roadmap items yet. Use `todo-in-cli roadmap add`.",
         )]
@@ -306,6 +409,17 @@ fn roadmap_panel(roadmap: &[RoadmapItem], active: bool) -> List<'static> {
             })
             .collect()
     };
+
+    items.push(ListItem::new(""));
+    if adding {
+        items.push(ListItem::new(markdown::render_inline(&format!(
+            "> add roadmap: {input}"
+        ))));
+        items.push(ListItem::new("Enter saves, Esc cancels"));
+    } else {
+        items.push(ListItem::new("a: add roadmap"));
+    }
+
     List::new(items).block(panel_block("Roadmap", active))
 }
 
@@ -335,6 +449,20 @@ fn chat_panel(
     Paragraph::new(lines)
         .block(panel_block("Agent Chat", active))
         .wrap(Wrap { trim: true })
+}
+
+fn add_todo_from_tui(project: &Project, input: &str) -> Result<String> {
+    let mut store = Store::open_default_locked()?;
+    let todo = store.add_todo(&project.id, input.trim().to_string())?;
+    store.save()?;
+    Ok(format!("created todo {}: {}", todo.id, todo.title))
+}
+
+fn add_roadmap_from_tui(project: &Project, input: &str) -> Result<String> {
+    let mut store = Store::open_default_locked()?;
+    let item = store.add_roadmap_item(&project.id, input.trim().to_string())?;
+    store.save()?;
+    Ok(format!("created roadmap item {}: {}", item.id, item.title))
 }
 
 fn send_chat_message(
