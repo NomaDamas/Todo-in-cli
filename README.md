@@ -20,9 +20,7 @@ This repository is starting with an MVP implementation:
 ## Quick Start
 
 ```sh
-cargo run -- todo add "Ship the TUI MVP"
-cargo run -- roadmap add "v0.1: local todo and roadmap dashboard"
-cargo run -- tui
+cargo run -- todo add "Ship the TUI MVP" && cargo run -- roadmap add "v0.1: local todo and roadmap dashboard" && cargo run -- tui
 ```
 
 ## Commands
@@ -57,13 +55,19 @@ todo-in-cli github pull --dry-run
 Tab / Shift-Tab  Move focus between panes
 Mouse click      Focus a pane
 Project click    Switch the active project in the Project pane
+Todos pane       Press a, type a todo title, Enter saves
+Roadmap pane     Press a, type a roadmap title, Enter saves
 x                Toggle Codex mode indicator
-q / Esc / Ctrl-C Exit
+q / Esc / Ctrl-C Exit, Esc cancels an active add prompt
 Chat pane        Type directly, Enter sends to the selected provider
 ```
 
 Clicking Todos, Roadmap, or Chat only changes focus. The selected project stays active until
 you click a different project in the Project pane.
+
+Project switching requires more than one saved project. Open `todo-in-cli tui` from another
+repository or directory once to register another project. If tmux does not pass mouse clicks
+through to the TUI, enable mouse support with `tmux set -g mouse on`.
 
 The TUI renders a terminal-safe Markdown subset:
 
