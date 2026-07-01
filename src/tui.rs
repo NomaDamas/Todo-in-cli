@@ -119,6 +119,7 @@ fn run_loop(
 
         match event::read()? {
             Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
+                KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => break,
                 KeyCode::Esc if input_mode != InputMode::None => {
                     input_mode = InputMode::None;
                     todo_input.clear();
@@ -163,7 +164,6 @@ fn run_loop(
                 }
                 KeyCode::Char('q') if active != Pane::Chat => break,
                 KeyCode::Esc => break,
-                KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => break,
                 KeyCode::Char('x') if active != Pane::Chat => codex_enabled = !codex_enabled,
                 KeyCode::Char('a') if active == Pane::Todos => {
                     input_mode = InputMode::Todo;
@@ -218,10 +218,13 @@ fn run_loop(
                 _ => {}
             },
             Event::Mouse(mouse) if mouse.kind == MouseEventKind::Down(MouseButton::Left) => {
-                active = layout.pane_at(mouse.column, mouse.row).unwrap_or(active);
-                input_mode = InputMode::None;
-                todo_input.clear();
-                roadmap_input.clear();
+                let clicked = layout.pane_at(mouse.column, mouse.row).unwrap_or(active);
+                if clicked != active {
+                    input_mode = InputMode::None;
+                    todo_input.clear();
+                    roadmap_input.clear();
+                }
+                active = clicked;
                 if active == Pane::Project
                     && let Some(index) = layout.project_index_at(mouse.column, mouse.row)
                     && let Some(project) = projects.get(index)
