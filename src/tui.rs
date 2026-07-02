@@ -474,7 +474,15 @@ fn active_tmux_pane_project(enabled: bool, own_pane: Option<&str>) -> Result<Opt
         return Ok(None);
     }
 
+    let store = Store::open_default()?;
+    if let Some(project) = store.project_for_path(&active.current_path)? {
+        return Ok(Some(project));
+    }
+
     let mut store = Store::open_default_locked()?;
+    if let Some(project) = store.project_for_path(&active.current_path)? {
+        return Ok(Some(project));
+    }
     let project = store.ensure_project_for_path(&active.current_path)?;
     store.save()?;
     Ok(Some(project))

@@ -147,6 +147,17 @@ impl Store {
         self.ensure_project_for_root(root)
     }
 
+    pub fn project_for_path(&self, path: &Path) -> Result<Option<Project>> {
+        let root = project_root_for_path(path)?;
+        let root_string = root.to_string_lossy().to_string();
+        Ok(self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.root == root_string)
+            .cloned())
+    }
+
     pub fn ensure_project_for_root(&mut self, root: PathBuf) -> Result<Project> {
         let root_string = root.to_string_lossy().to_string();
         if let Some(project) = self
@@ -703,8 +714,10 @@ mod tests {
 
         let project = store.ensure_project_for_path(&dir).unwrap();
         let same_project = store.ensure_project_for_path(&dir).unwrap();
+        let found_project = store.project_for_path(&dir).unwrap().unwrap();
 
         assert_eq!(project.id, same_project.id);
+        assert_eq!(project.id, found_project.id);
         assert_eq!(project.root, dir.to_string_lossy());
     }
 

@@ -28,7 +28,7 @@ cargo run -- todo add "Ship the TUI MVP" && cargo run -- roadmap add "v0.1: loca
 ```sh
 todo-in-cli tui
 todo-in-cli tui --provider claude
-todo-in-cli tui --tmux-follow-active-pane
+todo-in-cli tui --no-tmux-follow-active-pane
 todo-in-cli todo add "Write acceptance tests"
 todo-in-cli todo edit <todo-id> "Write regression tests"
 todo-in-cli todo list
@@ -71,6 +71,8 @@ back into the dashboard does not reset the selected project.
 
 Inside the dashboard, clicking Todos, Roadmap, or Chat only changes focus. If tmux does not
 change the active pane on mouse click, enable mouse support with `tmux set -g mouse on`.
+Use `todo-in-cli tui --no-tmux-follow-active-pane` when you want the dashboard pinned to the
+project where it was launched.
 
 The TUI renders a terminal-safe Markdown subset:
 
