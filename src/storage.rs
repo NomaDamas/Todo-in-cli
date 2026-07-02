@@ -139,8 +139,16 @@ impl Store {
 
     pub fn ensure_current_project(&mut self) -> Result<Project> {
         let root = current_project_root()?;
-        let root_string = root.to_string_lossy().to_string();
+        self.ensure_project_for_root(root)
+    }
 
+    pub fn ensure_project_for_path(&mut self, path: &Path) -> Result<Project> {
+        let root = project_root_for_path(path)?;
+        self.ensure_project_for_root(root)
+    }
+
+    pub fn ensure_project_for_root(&mut self, root: PathBuf) -> Result<Project> {
+        let root_string = root.to_string_lossy().to_string();
         if let Some(project) = self
             .state
             .projects
@@ -615,7 +623,13 @@ pub struct ProjectSnapshot {
 }
 
 fn current_project_root() -> Result<PathBuf> {
+    project_root_for_path(&env::current_dir().context("failed to determine current directory")?)
+}
+
+fn project_root_for_path(path: &Path) -> Result<PathBuf> {
     if let Ok(output) = Command::new("git")
+        .arg("-C")
+        .arg(path)
         .args(["rev-parse", "--show-toplevel"])
         .output()
         && output.status.success()
@@ -626,7 +640,7 @@ fn current_project_root() -> Result<PathBuf> {
         }
     }
 
-    env::current_dir().context("failed to determine current directory")
+    Ok(path.to_path_buf())
 }
 
 fn ensure_non_empty(value: &str, label: &str) -> Result<()> {
@@ -675,6 +689,23 @@ mod tests {
         let todos = store.todos_for_project("project");
         assert!(todos[0].completed);
         assert!(todos[0].completed_at.is_some());
+    }
+
+    #[test]
+    fn ensures_project_for_explicit_path() {
+        let mut store = Store {
+            path: PathBuf::from("unused"),
+            state: AppState::default(),
+            _lock: None,
+        };
+        let dir = env::temp_dir().join(format!("todo-in-cli-project-{}", short_id()));
+        fs::create_dir_all(&dir).unwrap();
+
+        let project = store.ensure_project_for_path(&dir).unwrap();
+        let same_project = store.ensure_project_for_path(&dir).unwrap();
+
+        assert_eq!(project.id, same_project.id);
+        assert_eq!(project.root, dir.to_string_lossy());
     }
 
     #[test]

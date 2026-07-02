@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{env, path::PathBuf, process::Command, time::Duration};
 
 use anyhow::Result;
 use crossterm::{
@@ -37,14 +37,14 @@ enum InputMode {
     Roadmap,
 }
 
-pub fn run(project: Project, provider: ProviderKind) -> Result<()> {
+pub fn run(project: Project, provider: ProviderKind, tmux_follow_active_pane: bool) -> Result<()> {
     let mut stdout = std::io::stdout();
     enable_raw_mode()?;
     execute!(stdout, EnterAlternateScreen, event::EnableMouseCapture)?;
 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
-    let result = run_loop(&mut terminal, project, provider);
+    let result = run_loop(&mut terminal, project, provider, tmux_follow_active_pane);
 
     disable_raw_mode()?;
     execute!(
@@ -61,8 +61,10 @@ fn run_loop(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     project: Project,
     provider: ProviderKind,
+    tmux_follow_active_pane: bool,
 ) -> Result<()> {
     let mut current_project = project;
+    let own_tmux_pane = env::var("TMUX_PANE").ok();
     let mut codex_enabled = false;
     let mut chat_input = String::new();
     let mut todo_input = String::new();
@@ -73,6 +75,15 @@ fn run_loop(
     let mut layout = DashboardLayout::default();
 
     loop {
+        if input_mode == InputMode::None
+            && let Some(project) =
+                active_tmux_pane_project(tmux_follow_active_pane, own_tmux_pane.as_deref())?
+            && project.id != current_project.id
+        {
+            status = format!("following tmux pane: {}", project.root);
+            current_project = project;
+        }
+
         let view_store = Store::open_default()?;
         let projects = view_store.projects();
         if let Some(project) = projects
@@ -449,6 +460,55 @@ fn chat_panel(
     Paragraph::new(lines)
         .block(panel_block("Agent Chat", active))
         .wrap(Wrap { trim: true })
+}
+
+fn active_tmux_pane_project(enabled: bool, own_pane: Option<&str>) -> Result<Option<Project>> {
+    if !enabled || own_pane.is_none() || env::var_os("TMUX").is_none() {
+        return Ok(None);
+    }
+
+    let Some(active) = active_tmux_pane()? else {
+        return Ok(None);
+    };
+    if Some(active.pane_id.as_str()) == own_pane {
+        return Ok(None);
+    }
+
+    let mut store = Store::open_default_locked()?;
+    let project = store.ensure_project_for_path(&active.current_path)?;
+    store.save()?;
+    Ok(Some(project))
+}
+
+fn active_tmux_pane() -> Result<Option<TmuxPane>> {
+    let output = Command::new("tmux")
+        .args(["display-message", "-p", "#{pane_id}\t#{pane_current_path}"])
+        .output();
+
+    let Ok(output) = output else {
+        return Ok(None);
+    };
+    if !output.status.success() {
+        return Ok(None);
+    }
+
+    let raw = String::from_utf8_lossy(&output.stdout);
+    let Some((pane_id, current_path)) = raw.trim().split_once('\t') else {
+        return Ok(None);
+    };
+    if pane_id.is_empty() || current_path.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(TmuxPane {
+        pane_id: pane_id.to_string(),
+        current_path: PathBuf::from(current_path),
+    }))
+}
+
+struct TmuxPane {
+    pane_id: String,
+    current_path: PathBuf,
 }
 
 fn add_todo_from_tui(project: &Project, input: &str) -> Result<String> {

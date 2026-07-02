@@ -28,6 +28,7 @@ cargo run -- todo add "Ship the TUI MVP" && cargo run -- roadmap add "v0.1: loca
 ```sh
 todo-in-cli tui
 todo-in-cli tui --provider claude
+todo-in-cli tui --tmux-follow-active-pane
 todo-in-cli todo add "Write acceptance tests"
 todo-in-cli todo edit <todo-id> "Write regression tests"
 todo-in-cli todo list
@@ -54,7 +55,8 @@ todo-in-cli github pull --dry-run
 ```text
 Tab / Shift-Tab  Move focus between panes
 Mouse click      Focus a pane
-Project click    Switch the active project in the Project pane
+tmux pane click  Follow that pane's current directory as the active project
+Project click    Switch the active project in the in-app Project pane
 Todos pane       Press a, type a todo title, Enter saves
 Roadmap pane     Press a, type a roadmap title, Enter saves
 x                Toggle Codex mode indicator
@@ -62,12 +64,13 @@ q / Esc / Ctrl-C Exit, Esc cancels an active add prompt
 Chat pane        Type directly, Enter sends to the selected provider
 ```
 
-Clicking Todos, Roadmap, or Chat only changes focus. The selected project stays active until
-you click a different project in the Project pane.
+When running inside tmux, `todo-in-cli tui` follows the active tmux pane by default. Click a
+different tmux pane that is open in another project directory, and the TUI switches to that
+project's todos, roadmap, and chat. The pane running `todo-in-cli tui` is ignored so clicking
+back into the dashboard does not reset the selected project.
 
-Project switching requires more than one saved project. Open `todo-in-cli tui` from another
-repository or directory once to register another project. If tmux does not pass mouse clicks
-through to the TUI, enable mouse support with `tmux set -g mouse on`.
+Inside the dashboard, clicking Todos, Roadmap, or Chat only changes focus. If tmux does not
+change the active pane on mouse click, enable mouse support with `tmux set -g mouse on`.
 
 The TUI renders a terminal-safe Markdown subset:
 
