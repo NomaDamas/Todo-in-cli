@@ -13,6 +13,9 @@ pub enum Command {
     Tui {
         #[arg(long, value_enum, default_value_t = ProviderKind::Openai)]
         provider: ProviderKind,
+        /// Disable following the active tmux pane's current directory.
+        #[arg(long)]
+        no_tmux_follow_active_pane: bool,
     },
     /// Manage project-scoped todos.
     Todo {

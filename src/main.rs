@@ -20,15 +20,19 @@ async fn main() -> Result<()> {
 
     match cli.command.unwrap_or(Command::Tui {
         provider: todo_in_cli::cli::ProviderKind::Openai,
+        no_tmux_follow_active_pane: false,
     }) {
-        Command::Tui { provider } => {
+        Command::Tui {
+            provider,
+            no_tmux_follow_active_pane,
+        } => {
             let project = {
                 let mut store = Store::open_default_locked()?;
                 let project = store.ensure_current_project()?;
                 store.save()?;
                 project
             };
-            tui::run(project, provider)?;
+            tui::run(project, provider, !no_tmux_follow_active_pane)?;
         }
         Command::Todo { command } => match command {
             TodoCommand::Add { title } => {
